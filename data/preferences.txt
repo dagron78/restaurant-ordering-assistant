@@ -1,0 +1,26 @@
+# Restaurant Ordering Preferences
+# ================================
+# Write your ordering rules in natural language below.
+# The AI will interpret these when making recommendations.
+#
+# Guidelines:
+# - Be specific about item names or categories
+# - Mention vendor names clearly (Sysco, US Foods)
+# - Use clear conditions (price thresholds, quality concerns)
+#
+# Example rules (modify as needed):
+
+# Vendor Preferences
+Prefer Sysco for all produce items unless US Foods is significantly cheaper.
+Always buy dairy products from US Foods when available.
+
+# Price Alerts
+Alert me if Avocados exceed $55 per case.
+Notify me when Heavy Cream price increases more than 15%.
+
+# Quality Rules
+Quality over price for all beef products - prefer Sysco.
+For seafood, freshness is priority - check availability before ordering.
+
+# Exclusions
+# Never buy frozen fish from Sysco.

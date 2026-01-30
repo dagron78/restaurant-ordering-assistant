@@ -1,0 +1,31 @@
+# Restaurant Ordering Assistant Dependencies
+
+# Web Framework
+streamlit>=1.30.0
+
+# AI Engine
+google-generativeai>=0.3.0
+
+# Web Scraping
+playwright>=1.40.0
+
+# Email
+imap-tools>=1.5.0
+
+# Data Processing
+pandas>=2.0.0
+
+# Environment & Configuration
+python-dotenv>=1.0.0
+
+# Image Processing
+Pillow>=10.0.0
+
+# Background Task Scheduling
+APScheduler>=3.10.0
+
+# PDF Generation (for order exports)
+reportlab>=4.0.0
+
+# Testing
+pytest>=7.4.0

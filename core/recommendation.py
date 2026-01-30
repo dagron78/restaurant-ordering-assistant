@@ -1,0 +1,406 @@
+"""
+Recommendation Engine for Restaurant Ordering Assistant.
+
+Combines price data, trend analysis, and user preferences
+to generate intelligent ordering recommendations.
+"""
+
+from typing import List, Dict, Optional
+from pathlib import Path
+
+from .config import Config
+from .database import Database
+from .ai_engine import GeminiEngine
+
+
+class RecommendationEngine:
+    """
+    Generates ordering recommendations based on:
+    - Current prices from all vendors
+    - Historical price trends
+    - User-defined preferences
+    """
+    
+    def __init__(self, db: Database = None, ai: GeminiEngine = None):
+        """
+        Initialize the recommendation engine.
+        
+        Args:
+            db: Database instance (creates new if not provided)
+            ai: GeminiEngine instance (creates new if not provided)
+        """
+        self.db = db or Database()
+        self.ai = ai or GeminiEngine()
+        self.preferences: List[Dict] = []
+        self._preferences_loaded = False
+    
+    def load_preferences(self, preferences_file: Path = None) -> List[Dict]:
+        """
+        Load and parse preferences from file.
+        
+        Args:
+            preferences_file: Path to preferences text file
+            
+        Returns:
+            List of parsed preference rules
+        """
+        preferences_file = preferences_file or Config.PREFERENCES_PATH
+        
+        try:
+            if preferences_file.exists():
+                with open(preferences_file, 'r') as f:
+                    text = f.read()
+                
+                if text.strip():
+                    self.preferences = self.ai.parse_preferences(text)
+                    
+                    # Also save to database for persistence
+                    self.db.save_preferences(self.preferences)
+            else:
+                # Try loading from database
+                self.preferences = self.db.get_preferences()
+            
+            self._preferences_loaded = True
+            return self.preferences
+            
+        except Exception as e:
+            print(f"Error loading preferences: {e}")
+            self.preferences = []
+            self._preferences_loaded = True
+            return []
+    
+    def get_applicable_preferences(self, item_name: str, 
+                                   category: str = None) -> List[Dict]:
+        """
+        Filter preferences relevant to a specific item.
+        
+        Args:
+            item_name: Name of the item
+            category: Optional item category
+            
+        Returns:
+            List of applicable preference rules
+        """
+        if not self._preferences_loaded:
+            self.load_preferences()
+        
+        applicable = []
+        item_lower = item_name.lower()
+        category_lower = (category or '').lower()
+        
+        for pref in self.preferences:
+            pattern = pref.get('item_pattern', '*').lower()
+            
+            # Match all items
+            if pattern == '*':
+                applicable.append(pref)
+            # Match by item name
+            elif pattern in item_lower:
+                applicable.append(pref)
+            # Match by category
+            elif category_lower and pattern in category_lower:
+                applicable.append(pref)
+        
+        return applicable
+    
+    def calculate_trend(self, current_price: float, 
+                       avg_price: float) -> Dict:
+        """
+        Determine price trend and generate alerts.
+        
+        Args:
+            current_price: Current/latest price
+            avg_price: Historical average price
+            
+        Returns:
+            Dict with trend info, icon, and optional alert
+        """
+        if avg_price is None or avg_price == 0:
+            return {
+                'trend': 'unknown',
+                'icon': '⚪',
+                'change_pct': 0,
+                'alert': None
+            }
+        
+        change_pct = ((current_price - avg_price) / avg_price) * 100
+        
+        # Significant price spike
+        if change_pct > (Config.SPIKE_THRESHOLD * 100):
+            return {
+                'trend': 'spike',
+                'icon': '🔴',
+                'change_pct': change_pct,
+                'alert': f'Price up {change_pct:.1f}% vs {Config.TREND_DAYS}-day avg'
+            }
+        # Moderate increase
+        elif change_pct > 5:
+            return {
+                'trend': 'rising',
+                'icon': '🟡',
+                'change_pct': change_pct,
+                'alert': None
+            }
+        # Significant deal
+        elif change_pct < (Config.DEAL_THRESHOLD * 100):
+            return {
+                'trend': 'deal',
+                'icon': '🟢',
+                'change_pct': change_pct,
+                'alert': f'Price down {abs(change_pct):.1f}% - good time to stock up!'
+            }
+        # Moderate decrease
+        elif change_pct < -5:
+            return {
+                'trend': 'falling',
+                'icon': '🟢',
+                'change_pct': change_pct,
+                'alert': None
+            }
+        # Stable
+        else:
+            return {
+                'trend': 'stable',
+                'icon': '⚪',
+                'change_pct': change_pct,
+                'alert': None
+            }
+    
+    def get_best_vendor(self, prices: List[Dict], 
+                       preferences: List[Dict] = None) -> Dict:
+        """
+        Determine the best vendor based on price and preferences.
+        
+        Args:
+            prices: List of price records with vendor info
+            preferences: Applicable preference rules
+            
+        Returns:
+            Best price record with recommendation reason
+        """
+        if not prices:
+            return None
+        
+        # Start with lowest price
+        best = min(prices, key=lambda x: x.get('price', float('inf')))
+        reason = 'Lowest price'
+        
+        # Check preferences for overrides
+        if preferences:
+            for pref in preferences:
+                rule_type = pref.get('rule_type', '')
+                action = pref.get('action', '').lower()
+                
+                # Vendor preference
+                if rule_type == 'vendor_preference':
+                    for price in prices:
+                        vendor = price.get('vendor', '').lower()
+                        if vendor in action or action in vendor:
+                            # Check if price difference is acceptable
+                            price_diff = price['price'] - best['price']
+                            price_diff_pct = (price_diff / best['price']) * 100 if best['price'] > 0 else 0
+                            
+                            # Accept up to 15% higher for preferred vendor
+                            if price_diff_pct <= 15:
+                                best = price
+                                reason = f"Preferred vendor ({pref.get('condition', 'user preference')})"
+                            break
+                
+                # Exclusion rule
+                elif rule_type == 'exclusion':
+                    excluded_vendors = []
+                    for price in prices:
+                        vendor = price.get('vendor', '').lower()
+                        if vendor in action or action in vendor:
+                            excluded_vendors.append(vendor)
+                    
+                    # Filter out excluded vendors
+                    filtered = [p for p in prices 
+                               if p.get('vendor', '').lower() not in excluded_vendors]
+                    
+                    if filtered:
+                        best = min(filtered, key=lambda x: x.get('price', float('inf')))
+                        reason = f'Lowest price (excluding {", ".join(excluded_vendors)})'
+        
+        best['reason'] = reason
+        return best
+    
+    def generate_recommendation(self, item: Dict) -> Dict:
+        """
+        Generate a complete recommendation for a single item.
+        
+        Args:
+            item: Item dict with name, category, prices, avg_price
+            
+        Returns:
+            Complete recommendation with vendor, price, trend, etc.
+        """
+        item_name = item.get('name', 'Unknown')
+        category = item.get('category')
+        prices = item.get('prices', [])
+        avg_price = item.get('avg_price')
+        
+        # No prices available
+        if not prices:
+            return {
+                'item': item_name,
+                'category': category,
+                'recommended_vendor': 'N/A',
+                'price': None,
+                'unit': None,
+                'reason': 'No price data available',
+                'trend_icon': '⚫',
+                'trend': 'no_data',
+                'alert': 'No recent prices - consider updating',
+                'all_prices': []
+            }
+        
+        # Get applicable preferences
+        prefs = self.get_applicable_preferences(item_name, category)
+        
+        # Find best vendor
+        best = self.get_best_vendor(prices, prefs)
+        
+        # Calculate trend
+        trend_info = self.calculate_trend(best['price'], avg_price)
+        
+        # Check for price threshold alerts from preferences
+        alert = trend_info.get('alert')
+        for pref in prefs:
+            if pref.get('rule_type') == 'price_threshold':
+                condition = pref.get('condition', '')
+                # Simple price threshold check
+                if '>' in condition:
+                    try:
+                        threshold = float(condition.split('>')[-1].strip().replace('$', ''))
+                        if best['price'] > threshold:
+                            alert = f"Price ${best['price']:.2f} exceeds threshold ${threshold:.2f}"
+                    except ValueError:
+                        pass
+        
+        return {
+            'item': item_name,
+            'category': category,
+            'recommended_vendor': best.get('vendor', 'Unknown'),
+            'price': best.get('price'),
+            'unit': best.get('unit', 'Each'),
+            'reason': best.get('reason', 'Lowest price'),
+            'trend_icon': trend_info['icon'],
+            'trend': trend_info['trend'],
+            'change_pct': trend_info.get('change_pct', 0),
+            'alert': alert,
+            'all_prices': prices,
+            'avg_price': avg_price
+        }
+    
+    def generate_order_guide(self) -> List[Dict]:
+        """
+        Generate complete order recommendations for all active items.
+        
+        Returns:
+            List of recommendations sorted by category and item name
+        """
+        # Ensure preferences are loaded
+        if not self._preferences_loaded:
+            self.load_preferences()
+        
+        # Get all items with prices
+        items = self.db.get_all_items_with_prices()
+        
+        recommendations = []
+        for item in items:
+            rec = self.generate_recommendation(item)
+            recommendations.append(rec)
+        
+        # Sort by category then item name
+        recommendations.sort(key=lambda x: (x.get('category') or 'ZZZ', x.get('item', '')))
+        
+        return recommendations
+    
+    def get_summary_stats(self, recommendations: List[Dict] = None) -> Dict:
+        """
+        Calculate summary statistics for the order guide.
+        
+        Args:
+            recommendations: Pre-generated recommendations (generates if not provided)
+            
+        Returns:
+            Summary dict with counts and alerts
+        """
+        if recommendations is None:
+            recommendations = self.generate_order_guide()
+        
+        total_items = len(recommendations)
+        items_with_data = sum(1 for r in recommendations if r.get('price') is not None)
+        
+        # Count trends
+        trends = {'spike': 0, 'rising': 0, 'stable': 0, 'falling': 0, 'deal': 0, 'unknown': 0, 'no_data': 0}
+        for rec in recommendations:
+            trend = rec.get('trend', 'unknown')
+            trends[trend] = trends.get(trend, 0) + 1
+        
+        # Collect alerts
+        alerts = [r['alert'] for r in recommendations if r.get('alert')]
+        
+        # Vendor distribution
+        vendors = {}
+        for rec in recommendations:
+            vendor = rec.get('recommended_vendor', 'Unknown')
+            if vendor != 'N/A':
+                vendors[vendor] = vendors.get(vendor, 0) + 1
+        
+        return {
+            'total_items': total_items,
+            'items_with_prices': items_with_data,
+            'items_missing_prices': total_items - items_with_data,
+            'trends': trends,
+            'alerts': alerts,
+            'alert_count': len(alerts),
+            'vendor_distribution': vendors,
+            'deals_count': trends.get('deal', 0),
+            'spikes_count': trends.get('spike', 0)
+        }
+    
+    def compare_vendors(self, item_name: str) -> Dict:
+        """
+        Get detailed vendor comparison for a specific item.
+        
+        Args:
+            item_name: Name of the item to compare
+            
+        Returns:
+            Comparison dict with all vendor prices and analysis
+        """
+        prices = self.db.get_latest_prices(item_name)
+        avg_price = self.db.get_average_price(item_name)
+        history = self.db.get_price_history(item_name)
+        
+        if not prices:
+            return {
+                'item': item_name,
+                'prices': [],
+                'best_vendor': None,
+                'avg_price': None,
+                'history': []
+            }
+        
+        prefs = self.get_applicable_preferences(item_name)
+        best = self.get_best_vendor(prices, prefs)
+        
+        # Add comparison info to each price
+        for price in prices:
+            price['is_best'] = price.get('vendor') == best.get('vendor')
+            if avg_price:
+                price['vs_avg'] = ((price['price'] - avg_price) / avg_price) * 100
+            else:
+                price['vs_avg'] = 0
+        
+        return {
+            'item': item_name,
+            'prices': prices,
+            'best_vendor': best.get('vendor'),
+            'best_reason': best.get('reason'),
+            'avg_price': avg_price,
+            'applicable_preferences': prefs,
+            'history': history
+        }

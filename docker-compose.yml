@@ -1,0 +1,65 @@
+# Restaurant Ordering Assistant - Docker Compose Configuration
+# 
+# Usage:
+#   Development: docker-compose up
+#   Production:  docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+version: '3.8'
+
+services:
+  # Main Streamlit Application
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: restaurant-ordering-app
+    ports:
+      - "8501:8501"
+    volumes:
+      # Persist database and session data
+      - ./data:/app/data
+      # Mount preferences file for easy editing
+      - ./data/preferences.txt:/app/data/preferences.txt
+    environment:
+      - STREAMLIT_SERVER_PORT=8501
+      - STREAMLIT_SERVER_ADDRESS=0.0.0.0
+      - STREAMLIT_SERVER_HEADLESS=true
+      - STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+    env_file:
+      - .env
+    restart: unless-stopped
+    networks:
+      - restaurant-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Background Scheduler (Email monitoring, Web scraping)
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: restaurant-ordering-scheduler
+    command: ["python", "workers/scheduler.py"]
+    volumes:
+      - ./data:/app/data
+    env_file:
+      - .env
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - restaurant-network
+
+networks:
+  restaurant-network:
+    driver: bridge
+
+# Optional: Add volume definitions for persistence
+volumes:
+  app-data:
+    driver: local
