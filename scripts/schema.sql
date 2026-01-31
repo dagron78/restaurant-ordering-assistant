@@ -70,13 +70,16 @@ CREATE TABLE IF NOT EXISTS preferences (
 
 -- ===========================================
 -- ORDERS TABLE
--- Order history and drafts
+-- Order history and drafts with savings tracking
 -- ===========================================
 CREATE TABLE IF NOT EXISTS orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     order_date DATETIME DEFAULT CURRENT_TIMESTAMP,
     status TEXT CHECK(status IN ('draft', 'submitted', 'completed', 'cancelled')) DEFAULT 'draft',
     total_amount REAL,
+    total_savings REAL DEFAULT 0,
+    savings_vs_avg REAL DEFAULT 0,
+    savings_vs_max REAL DEFAULT 0,
     notes TEXT,
     created_by TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -85,7 +88,7 @@ CREATE TABLE IF NOT EXISTS orders (
 
 -- ===========================================
 -- ORDER ITEMS TABLE
--- Individual items in an order
+-- Individual items in an order with savings details
 -- ===========================================
 CREATE TABLE IF NOT EXISTS order_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -96,10 +99,32 @@ CREATE TABLE IF NOT EXISTS order_items (
     unit TEXT,
     unit_price REAL,
     total_price REAL,
+    avg_price REAL,
+    max_price REAL,
+    savings_vs_avg REAL DEFAULT 0,
+    savings_vs_max REAL DEFAULT 0,
     notes TEXT,
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
     FOREIGN KEY (item_id) REFERENCES items(id),
     FOREIGN KEY (vendor_id) REFERENCES vendors(id)
+);
+
+-- ===========================================
+-- SAVINGS SUMMARY TABLE
+-- Aggregated savings tracking over time
+-- ===========================================
+CREATE TABLE IF NOT EXISTS savings_summary (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    period_start DATE NOT NULL,
+    period_end DATE NOT NULL,
+    period_type TEXT CHECK(period_type IN ('daily', 'weekly', 'monthly')) DEFAULT 'weekly',
+    total_orders INTEGER DEFAULT 0,
+    total_spent REAL DEFAULT 0,
+    total_savings_vs_avg REAL DEFAULT 0,
+    total_savings_vs_max REAL DEFAULT 0,
+    items_ordered INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(period_start, period_end, period_type)
 );
 
 -- ===========================================
@@ -128,6 +153,8 @@ CREATE INDEX IF NOT EXISTS idx_items_category ON items(category);
 CREATE INDEX IF NOT EXISTS idx_items_active ON items(is_active);
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_orders_date ON orders(order_date);
+CREATE INDEX IF NOT EXISTS idx_savings_summary_period ON savings_summary(period_start, period_end);
+CREATE INDEX IF NOT EXISTS idx_savings_summary_type ON savings_summary(period_type);
 
 -- ===========================================
 -- INITIAL DATA - DEFAULT VENDORS

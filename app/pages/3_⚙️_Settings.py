@@ -33,6 +33,12 @@ tab1, tab2, tab3, tab4 = st.tabs(["📸 Add Items", "📝 Preferences", "🔧 Sy
 # TAB 1: ADD ITEMS
 # ===========================================
 with tab1:
+# Load custom CSS
+    css_path = Path(__file__).parent.parent / 'assets' / 'style.css'
+    if css_path.exists():
+        with open(css_path, 'r') as f:
+            st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
+
     st.header("Add Items from Documents")
     st.markdown("Upload photos of invoices or price lists to automatically extract items.")
     
@@ -41,11 +47,25 @@ with tab1:
     with col1:
         st.subheader("📤 Upload Document")
         
-        uploaded_file = st.file_uploader(
-            "Upload invoice or price list",
-            type=['png', 'jpg', 'jpeg', 'pdf'],
-            help="Supported formats: PNG, JPG, PDF"
-        )
+        # Tabs for Upload vs Camera
+        up_tab1, up_tab2 = st.tabs(["📁 File Upload", "📸 Camera Scan"])
+        
+        uploaded_file = None
+        
+        with up_tab1:
+            file_upload = st.file_uploader(
+                "Upload invoice or price list",
+                type=['png', 'jpg', 'jpeg', 'pdf'],
+                help="Supported formats: PNG, JPG, PDF",
+                key="file_uploader"
+            )
+            if file_upload:
+                uploaded_file = file_upload
+
+        with up_tab2:
+            camera_photo = st.camera_input("Take a photo of invoice")
+            if camera_photo:
+                uploaded_file = camera_photo
         
         vendor_hint = st.selectbox(
             "Vendor (optional)",
@@ -54,7 +74,7 @@ with tab1:
         )
         
         if uploaded_file:
-            st.image(uploaded_file, caption="Uploaded Document", use_container_width=True)
+            st.image(uploaded_file, caption="Document to Process", use_container_width=True)
             
             if st.button("🔍 Extract Items", type="primary"):
                 with st.spinner("AI is analyzing the document..."):
@@ -122,9 +142,10 @@ with tab1:
                 if st.button("🗑️ Clear", use_container_width=True):
                     del st.session_state['extracted_items']
                     st.rerun()
+                    
         else:
-            st.info("Upload and process a document to see extracted items here.")
-    
+             st.info("Upload and process a document to see extracted items here.")
+
     st.divider()
     
     # Manual entry
@@ -170,17 +191,45 @@ with tab2:
     st.header("Ordering Preferences")
     st.markdown("Write your ordering rules in natural language. The AI will interpret them when making recommendations.")
     
+    # helper for inserting text
+    def insert_pref(text):
+        if 'prefs_input' not in st.session_state:
+            st.session_state['prefs_input'] = ""
+        st.session_state['prefs_input'] += f"\n{text}"
+
+    # Chips
+    st.markdown('<div style="margin-bottom:10px;">', unsafe_allow_html=True)
+    chip_cols = st.columns(4)
+    with chip_cols[0]:
+         if st.button("➕ Vendor Rule", help="Prefer X for Y"):
+             insert_pref("Prefer [Vendor] for [Category]")
+    with chip_cols[1]:
+         if st.button("💲 Price Alert", help="Alert if price > X"):
+             insert_pref("Alert me if [Item] exceeds $[Price]")
+    with chip_cols[2]:
+         if st.button("💎 Quality Rule", help="Quality over price"):
+             insert_pref("Quality over price for [Item]")
+    with chip_cols[3]:
+         if st.button("🚫 Ban Rule", help="Never buy X"):
+             insert_pref("Never buy [Item] from [Vendor]")
+    st.markdown('</div>', unsafe_allow_html=True)
+
     # Load current preferences
     current_prefs = ""
     if Config.PREFERENCES_PATH.exists():
         with open(Config.PREFERENCES_PATH, 'r') as f:
             current_prefs = f.read()
     
+    # Initialize session state for text area if not present (or sync with file)
+    if 'prefs_input' not in st.session_state:
+        st.session_state['prefs_input'] = current_prefs
+
     prefs_text = st.text_area(
         "Preferences",
-        value=current_prefs,
+        value=st.session_state['prefs_input'],
         height=300,
-        help="Write your rules in plain English"
+        help="Write your rules in plain English",
+        key="prefs_input"
     )
     
     col1, col2 = st.columns([1, 3])

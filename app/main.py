@@ -36,18 +36,84 @@ def get_database():
 
 db = get_database()
 
+# Load custom CSS
+def load_css():
+    """Load custom CSS styles."""
+    css_path = Path(__file__).parent / 'assets' / 'style.css'
+    if css_path.exists():
+        with open(css_path, 'r') as f:
+            st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
+
+load_css()
+
+# Helper to read image as base64
+import base64
+def get_image_base64(path):
+    with open(path, "rb") as f:
+        data = f.read()
+    return base64.b64encode(data).decode()
+
+# Load icons
+try:
+    assets_dir = Path(__file__).parent / 'assets' / 'images'
+    # Find the latest generated files
+    icon_order = list(assets_dir.glob('icon_order*.png'))[0]
+    icon_scan = list(assets_dir.glob('icon_scan*.png'))[0]
+    icon_trends = list(assets_dir.glob('icon_trends*.png'))[0]
+    img_order = f"data:image/png;base64,{get_image_base64(icon_order)}"
+    img_scan = f"data:image/png;base64,{get_image_base64(icon_scan)}"
+    img_trends = f"data:image/png;base64,{get_image_base64(icon_trends)}"
+except Exception:
+    # Fallback if images missing
+    img_order, img_scan, img_trends = "", "", ""
+
 # Main page content
-st.title("👨‍🍳 Kitchen Order Guide")
+st.title("Kitchen Order Guide")
 st.markdown("*Smart ordering recommendations powered by AI*")
 
-# Navigation help
-st.markdown("""
-Welcome to your Kitchen Order Guide! Use the sidebar to navigate:
+# Quick Action Dashboard
+st.markdown("### 🚀 Quick Actions")
 
-- **📋 Order Guide** - View recommendations and create orders
-- **📈 Trends** - Analyze price history and trends  
-- **⚙️ Settings** - Configure preferences and manage data
-""")
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    with st.container():
+        st.markdown(
+            f"""
+            <a href="/Order_Guide" target="_self" class="action-card">
+                <div class="action-icon"><img src="{img_order}" width="80"></div>
+                <div class="action-title">Start Order</div>
+                <div class="action-desc">View recommendations & create orders</div>
+            </a>
+            """,
+            unsafe_allow_html=True
+        )
+
+with col2:
+    with st.container():
+        st.markdown(
+            f"""
+            <a href="/Settings" target="_self" class="action-card">
+                <div class="action-icon"><img src="{img_scan}" width="80"></div>
+                <div class="action-title">Scan Invoice</div>
+                <div class="action-desc">Upload photos to add new items</div>
+            </a>
+            """,
+            unsafe_allow_html=True
+        )
+
+with col3:
+    with st.container():
+        st.markdown(
+            f"""
+            <a href="/Trends" target="_self" class="action-card">
+                <div class="action-icon"><img src="{img_trends}" width="80"></div>
+                <div class="action-title">Analyze Trends</div>
+                <div class="action-desc">Check price history & reports</div>
+            </a>
+            """,
+            unsafe_allow_html=True
+        )
 
 st.divider()
 
