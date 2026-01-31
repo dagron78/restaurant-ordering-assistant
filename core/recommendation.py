@@ -227,13 +227,13 @@ class RecommendationEngine:
     
     def generate_recommendation(self, item: Dict) -> Dict:
         """
-        Generate a complete recommendation for a single item.
+        Generate a complete recommendation for a single item with savings info.
         
         Args:
             item: Item dict with name, category, prices, avg_price
             
         Returns:
-            Complete recommendation with vendor, price, trend, etc.
+            Complete recommendation with vendor, price, trend, savings, etc.
         """
         item_name = item.get('name', 'Unknown')
         category = item.get('category')
@@ -244,15 +244,22 @@ class RecommendationEngine:
         if not prices:
             return {
                 'item': item_name,
+                'item_id': item.get('id'),
                 'category': category,
                 'recommended_vendor': 'N/A',
+                'vendor_id': None,
                 'price': None,
                 'unit': None,
                 'reason': 'No price data available',
                 'trend_icon': '⚫',
                 'trend': 'no_data',
                 'alert': 'No recent prices - consider updating',
-                'all_prices': []
+                'all_prices': [],
+                'avg_price': None,
+                'max_price': None,
+                'savings_vs_avg': 0,
+                'savings_vs_max': 0,
+                'savings_pct': 0
             }
         
         # Get applicable preferences
@@ -263,6 +270,21 @@ class RecommendationEngine:
         
         # Calculate trend
         trend_info = self.calculate_trend(best['price'], avg_price)
+        
+        # Calculate max price from all vendors
+        max_price = max(p.get('price', 0) for p in prices) if prices else None
+        
+        # Calculate savings
+        savings_vs_avg = 0
+        savings_vs_max = 0
+        savings_pct = 0
+        
+        if avg_price and best['price'] < avg_price:
+            savings_vs_avg = avg_price - best['price']
+        
+        if max_price and best['price'] < max_price:
+            savings_vs_max = max_price - best['price']
+            savings_pct = (savings_vs_max / max_price) * 100 if max_price > 0 else 0
         
         # Check for price threshold alerts from preferences
         alert = trend_info.get('alert')
@@ -278,10 +300,18 @@ class RecommendationEngine:
                     except ValueError:
                         pass
         
+        # Get vendor_id for the recommended vendor
+        vendor_id = None
+        vendor = self.db.get_vendor(name=best.get('vendor'))
+        if vendor:
+            vendor_id = vendor.get('id')
+        
         return {
             'item': item_name,
+            'item_id': item.get('id'),
             'category': category,
             'recommended_vendor': best.get('vendor', 'Unknown'),
+            'vendor_id': vendor_id,
             'price': best.get('price'),
             'unit': best.get('unit', 'Each'),
             'reason': best.get('reason', 'Lowest price'),
@@ -290,7 +320,11 @@ class RecommendationEngine:
             'change_pct': trend_info.get('change_pct', 0),
             'alert': alert,
             'all_prices': prices,
-            'avg_price': avg_price
+            'avg_price': avg_price,
+            'max_price': max_price,
+            'savings_vs_avg': savings_vs_avg,
+            'savings_vs_max': savings_vs_max,
+            'savings_pct': savings_pct
         }
     
     def generate_order_guide(self) -> List[Dict]:
@@ -319,13 +353,13 @@ class RecommendationEngine:
     
     def get_summary_stats(self, recommendations: List[Dict] = None) -> Dict:
         """
-        Calculate summary statistics for the order guide.
+        Calculate summary statistics for the order guide including potential savings.
         
         Args:
             recommendations: Pre-generated recommendations (generates if not provided)
             
         Returns:
-            Summary dict with counts and alerts
+            Summary dict with counts, alerts, and savings info
         """
         if recommendations is None:
             recommendations = self.generate_order_guide()
@@ -349,6 +383,22 @@ class RecommendationEngine:
             if vendor != 'N/A':
                 vendors[vendor] = vendors.get(vendor, 0) + 1
         
+        # Calculate potential savings across all items
+        total_potential_savings_vs_avg = sum(
+            r.get('savings_vs_avg', 0) for r in recommendations
+            if r.get('price') is not None
+        )
+        total_potential_savings_vs_max = sum(
+            r.get('savings_vs_max', 0) for r in recommendations
+            if r.get('price') is not None
+        )
+        
+        # Items with savings opportunities
+        items_with_savings = sum(
+            1 for r in recommendations
+            if r.get('savings_vs_max', 0) > 0
+        )
+        
         return {
             'total_items': total_items,
             'items_with_prices': items_with_data,
@@ -358,7 +408,67 @@ class RecommendationEngine:
             'alert_count': len(alerts),
             'vendor_distribution': vendors,
             'deals_count': trends.get('deal', 0),
-            'spikes_count': trends.get('spike', 0)
+            'spikes_count': trends.get('spike', 0),
+            'potential_savings_vs_avg': total_potential_savings_vs_avg,
+            'potential_savings_vs_max': total_potential_savings_vs_max,
+            'items_with_savings': items_with_savings
+        }
+    
+    def calculate_order_savings(self, order_items: List[Dict]) -> Dict:
+        """
+        Calculate total savings for an order.
+        
+        Args:
+            order_items: List of items with quantities:
+                - item: item name
+                - qty: quantity ordered
+                - unit_price: price per unit
+                - avg_price: average historical price
+                - max_price: max vendor price
+                
+        Returns:
+            Dict with order savings breakdown
+        """
+        total_cost = 0
+        total_savings_vs_avg = 0
+        total_savings_vs_max = 0
+        items_with_savings = 0
+        
+        for item in order_items:
+            qty = item.get('qty', 0)
+            unit_price = item.get('unit_price', 0)
+            avg_price = item.get('avg_price', unit_price)
+            max_price = item.get('max_price', unit_price)
+            
+            item_cost = qty * unit_price
+            total_cost += item_cost
+            
+            if avg_price and avg_price > unit_price:
+                total_savings_vs_avg += qty * (avg_price - unit_price)
+            
+            if max_price and max_price > unit_price:
+                savings = qty * (max_price - unit_price)
+                total_savings_vs_max += savings
+                if savings > 0:
+                    items_with_savings += 1
+        
+        # Calculate what you would have paid at max prices
+        potential_max_cost = sum(
+            item.get('qty', 0) * (item.get('max_price') or item.get('unit_price', 0))
+            for item in order_items
+        )
+        
+        savings_pct = 0
+        if potential_max_cost > 0:
+            savings_pct = (total_savings_vs_max / potential_max_cost) * 100
+        
+        return {
+            'total_cost': total_cost,
+            'total_savings_vs_avg': total_savings_vs_avg,
+            'total_savings_vs_max': total_savings_vs_max,
+            'items_with_savings': items_with_savings,
+            'potential_max_cost': potential_max_cost,
+            'savings_percentage': savings_pct
         }
     
     def compare_vendors(self, item_name: str) -> Dict:

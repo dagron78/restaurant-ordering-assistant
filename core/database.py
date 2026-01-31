@@ -416,47 +416,82 @@ class Database:
     
     def create_order(self, items: List[Dict], notes: str = None) -> int:
         """
-        Create a new order with items.
+        Create a new order with items and savings tracking.
         
         Args:
-            items: List of order items (item_id, vendor_id, quantity, unit_price)
+            items: List of order items with savings info:
+                - item_id, vendor_id, quantity, unit_price
+                - avg_price, max_price (for savings calculation)
             notes: Order notes
             
         Returns:
             Order ID
         """
         with self.get_connection() as conn:
-            # Create order
-            total = sum(item.get('quantity', 0) * item.get('unit_price', 0) 
-                       for item in items)
+            # Calculate totals and savings
+            total = 0
+            total_savings_vs_avg = 0
+            total_savings_vs_max = 0
+            
+            for item in items:
+                qty = item.get('quantity', 0)
+                unit_price = item.get('unit_price', 0)
+                avg_price = item.get('avg_price', unit_price)
+                max_price = item.get('max_price', unit_price)
+                
+                item_total = qty * unit_price
+                total += item_total
+                
+                # Calculate savings vs average price
+                if avg_price and avg_price > unit_price:
+                    total_savings_vs_avg += qty * (avg_price - unit_price)
+                
+                # Calculate savings vs max vendor price
+                if max_price and max_price > unit_price:
+                    total_savings_vs_max += qty * (max_price - unit_price)
             
             cursor = conn.execute(
-                "INSERT INTO orders (total_amount, notes) VALUES (?, ?)",
-                (total, notes)
+                """INSERT INTO orders
+                   (total_amount, total_savings, savings_vs_avg, savings_vs_max, notes)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (total, total_savings_vs_max, total_savings_vs_avg, total_savings_vs_max, notes)
             )
             order_id = cursor.lastrowid
             
-            # Add order items
+            # Add order items with savings details
             for item in items:
-                total_price = item.get('quantity', 0) * item.get('unit_price', 0)
+                qty = item.get('quantity', 0)
+                unit_price = item.get('unit_price', 0)
+                avg_price = item.get('avg_price', unit_price)
+                max_price = item.get('max_price', unit_price)
+                
+                total_price = qty * unit_price
+                savings_vs_avg = qty * (avg_price - unit_price) if avg_price and avg_price > unit_price else 0
+                savings_vs_max = qty * (max_price - unit_price) if max_price and max_price > unit_price else 0
+                
                 conn.execute("""
-                    INSERT INTO order_items 
-                    (order_id, item_id, vendor_id, quantity, unit, unit_price, total_price)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO order_items
+                    (order_id, item_id, vendor_id, quantity, unit, unit_price, total_price,
+                     avg_price, max_price, savings_vs_avg, savings_vs_max)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     order_id,
                     item['item_id'],
                     item['vendor_id'],
-                    item.get('quantity', 0),
+                    qty,
                     item.get('unit', 'Each'),
-                    item.get('unit_price', 0),
-                    total_price
+                    unit_price,
+                    total_price,
+                    avg_price,
+                    max_price,
+                    savings_vs_avg,
+                    savings_vs_max
                 ))
             
             return order_id
     
     def get_order(self, order_id: int) -> Optional[Dict]:
-        """Get order with items."""
+        """Get order with items and savings details."""
         with self.get_connection() as conn:
             cursor = conn.execute(
                 "SELECT * FROM orders WHERE id = ?", (order_id,)
@@ -479,6 +514,200 @@ class Database:
             order_dict['items'] = [dict(row) for row in cursor.fetchall()]
             
             return order_dict
+    
+    def get_max_price_for_item(self, item_name: str) -> Optional[float]:
+        """
+        Get the maximum price from any vendor for an item (current prices).
+        
+        Args:
+            item_name: Name of the item
+            
+        Returns:
+            Maximum price or None if no data
+        """
+        prices = self.get_latest_prices(item_name)
+        if not prices:
+            return None
+        return max(p.get('price', 0) for p in prices)
+    
+    def get_orders_with_savings(self,
+                                 start_date: str = None,
+                                 end_date: str = None,
+                                 status: str = 'completed') -> List[Dict]:
+        """
+        Get orders with savings information for a date range.
+        
+        Args:
+            start_date: Start date (YYYY-MM-DD format)
+            end_date: End date (YYYY-MM-DD format)
+            status: Order status filter
+            
+        Returns:
+            List of orders with savings data
+        """
+        with self.get_connection() as conn:
+            query = """
+                SELECT id, order_date, status, total_amount,
+                       total_savings, savings_vs_avg, savings_vs_max,
+                       notes, created_at
+                FROM orders
+                WHERE 1=1
+            """
+            params = []
+            
+            if status:
+                query += " AND status = ?"
+                params.append(status)
+            
+            if start_date:
+                query += " AND date(order_date) >= ?"
+                params.append(start_date)
+            
+            if end_date:
+                query += " AND date(order_date) <= ?"
+                params.append(end_date)
+            
+            query += " ORDER BY order_date DESC"
+            
+            cursor = conn.execute(query, params)
+            return [dict(row) for row in cursor.fetchall()]
+    
+    def get_savings_summary(self, period_type: str = 'weekly',
+                           limit: int = 12) -> List[Dict]:
+        """
+        Get aggregated savings over time periods.
+        
+        Args:
+            period_type: 'daily', 'weekly', or 'monthly'
+            limit: Number of periods to return
+            
+        Returns:
+            List of savings summaries by period
+        """
+        with self.get_connection() as conn:
+            if period_type == 'daily':
+                date_format = '%Y-%m-%d'
+                group_by = "date(order_date)"
+            elif period_type == 'monthly':
+                date_format = '%Y-%m'
+                group_by = "strftime('%Y-%m', order_date)"
+            else:  # weekly
+                date_format = '%Y-%W'
+                group_by = "strftime('%Y-%W', order_date)"
+            
+            cursor = conn.execute(f"""
+                SELECT
+                    {group_by} as period,
+                    COUNT(*) as total_orders,
+                    SUM(total_amount) as total_spent,
+                    SUM(savings_vs_avg) as total_savings_vs_avg,
+                    SUM(savings_vs_max) as total_savings_vs_max,
+                    MIN(date(order_date)) as period_start,
+                    MAX(date(order_date)) as period_end
+                FROM orders
+                WHERE status = 'completed'
+                GROUP BY {group_by}
+                ORDER BY period DESC
+                LIMIT ?
+            """, (limit,))
+            
+            return [dict(row) for row in cursor.fetchall()]
+    
+    def get_total_savings(self, start_date: str = None,
+                         end_date: str = None) -> Dict:
+        """
+        Get total savings across all orders in a date range.
+        
+        Args:
+            start_date: Start date (YYYY-MM-DD format)
+            end_date: End date (YYYY-MM-DD format)
+            
+        Returns:
+            Dict with total savings metrics
+        """
+        with self.get_connection() as conn:
+            query = """
+                SELECT
+                    COUNT(*) as total_orders,
+                    COALESCE(SUM(total_amount), 0) as total_spent,
+                    COALESCE(SUM(savings_vs_avg), 0) as total_savings_vs_avg,
+                    COALESCE(SUM(savings_vs_max), 0) as total_savings_vs_max,
+                    COALESCE(AVG(savings_vs_max), 0) as avg_savings_per_order
+                FROM orders
+                WHERE status = 'completed'
+            """
+            params = []
+            
+            if start_date:
+                query += " AND date(order_date) >= ?"
+                params.append(start_date)
+            
+            if end_date:
+                query += " AND date(order_date) <= ?"
+                params.append(end_date)
+            
+            cursor = conn.execute(query, params)
+            row = cursor.fetchone()
+            
+            if row:
+                result = dict(row)
+                # Calculate savings percentage
+                if result['total_spent'] > 0:
+                    potential_spend = result['total_spent'] + result['total_savings_vs_max']
+                    result['savings_percentage'] = (result['total_savings_vs_max'] / potential_spend) * 100
+                else:
+                    result['savings_percentage'] = 0
+                return result
+            
+            return {
+                'total_orders': 0,
+                'total_spent': 0,
+                'total_savings_vs_avg': 0,
+                'total_savings_vs_max': 0,
+                'avg_savings_per_order': 0,
+                'savings_percentage': 0
+            }
+    
+    def get_item_savings_breakdown(self, order_id: int = None) -> List[Dict]:
+        """
+        Get savings breakdown by item for an order or all orders.
+        
+        Args:
+            order_id: Specific order ID (optional, None for all)
+            
+        Returns:
+            List of items with savings details
+        """
+        with self.get_connection() as conn:
+            query = """
+                SELECT
+                    i.name as item_name,
+                    i.category,
+                    SUM(oi.quantity) as total_quantity,
+                    SUM(oi.total_price) as total_spent,
+                    SUM(oi.savings_vs_avg) as savings_vs_avg,
+                    SUM(oi.savings_vs_max) as savings_vs_max,
+                    AVG(oi.unit_price) as avg_unit_price,
+                    v.name as most_used_vendor
+                FROM order_items oi
+                JOIN items i ON oi.item_id = i.id
+                JOIN vendors v ON oi.vendor_id = v.id
+                JOIN orders o ON oi.order_id = o.id
+                WHERE o.status = 'completed'
+            """
+            params = []
+            
+            if order_id:
+                query += " AND oi.order_id = ?"
+                params.append(order_id)
+            
+            query += """
+                GROUP BY i.id
+                ORDER BY savings_vs_max DESC
+            """
+            
+            cursor = conn.execute(query, params)
+            return [dict(row) for row in cursor.fetchall()]
     
     # ==========================================
     # PROCESSING LOG OPERATIONS
