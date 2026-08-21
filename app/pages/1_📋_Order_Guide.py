@@ -339,10 +339,17 @@ if (generate_summary or save_order) and order_items:
                     })
             
             if db_order_items:
-                order_id = db.create_order(db_order_items, notes=f"Order created on {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+                order_id = db.create_order(
+                    db_order_items,
+                    notes=f"Order created on {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+                    status='completed'  # Saved orders count toward savings dashboards
+                )
                 st.success(f"✅ Order #{order_id} saved! Total savings: ${savings_info['total_savings_vs_max']:.2f}")
                 
-                # Clear quantities after saving
+                # Clear quantities after saving (both the dict and the
+                # number_input widget states keyed by item name)
+                for entry in order_items:
+                    st.session_state.pop(f"qty_{entry['item']}", None)
                 st.session_state.order_quantities = {}
             else:
                 st.warning("Could not save order - missing item or vendor IDs. Please refresh and try again.")

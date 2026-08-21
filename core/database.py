@@ -37,6 +37,11 @@ class Database:
         """
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
+        # Enforce declared foreign keys (off by default in SQLite),
+        # tolerate concurrent access from workers, and allow writers to wait.
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA busy_timeout = 5000")
         try:
             yield conn
             conn.commit()
@@ -276,21 +281,28 @@ class Database:
             item_name: Name of the item
             
         Returns:
-            List of price records with vendor info
+            List of price records with vendor info (one per vendor)
         """
         with self.get_connection() as conn:
+            # date_recorded has day precision, so several sheets can share the
+            # newest date. Rank by created_at/id to return exactly one row per
+            # vendor: whichever was inserted last.
             cursor = conn.execute("""
-                SELECT v.name as vendor, ph.price, ph.unit, ph.date_recorded, ph.source
-                FROM price_history ph
-                JOIN items i ON ph.item_id = i.id
-                JOIN vendors v ON ph.vendor_id = v.id
-                WHERE i.name = ?
-                AND ph.date_recorded = (
-                    SELECT MAX(ph2.date_recorded)
-                    FROM price_history ph2
-                    WHERE ph2.item_id = ph.item_id AND ph2.vendor_id = ph.vendor_id
+                SELECT vendor, price, unit, date_recorded, source
+                FROM (
+                    SELECT v.name as vendor, ph.price, ph.unit,
+                           ph.date_recorded, ph.source,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY ph.vendor_id
+                               ORDER BY ph.created_at DESC, ph.id DESC
+                           ) as rn
+                    FROM price_history ph
+                    JOIN items i ON ph.item_id = i.id
+                    JOIN vendors v ON ph.vendor_id = v.id
+                    WHERE i.name = ?
                 )
-                ORDER BY ph.price
+                WHERE rn = 1
+                ORDER BY price
             """, (item_name,))
             
             return [dict(row) for row in cursor.fetchall()]
@@ -414,7 +426,8 @@ class Database:
     # ORDERS OPERATIONS
     # ==========================================
     
-    def create_order(self, items: List[Dict], notes: str = None) -> int:
+    def create_order(self, items: List[Dict], notes: str = None,
+                     status: str = 'draft') -> int:
         """
         Create a new order with items and savings tracking.
         
@@ -423,6 +436,8 @@ class Database:
                 - item_id, vendor_id, quantity, unit_price
                 - avg_price, max_price (for savings calculation)
             notes: Order notes
+            status: Initial status ('draft', 'submitted', 'completed',
+                'cancelled'). Savings dashboards only read 'completed'.
             
         Returns:
             Order ID
@@ -452,9 +467,10 @@ class Database:
             
             cursor = conn.execute(
                 """INSERT INTO orders
-                   (total_amount, total_savings, savings_vs_avg, savings_vs_max, notes)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (total, total_savings_vs_max, total_savings_vs_avg, total_savings_vs_max, notes)
+                   (status, total_amount, total_savings, savings_vs_avg, savings_vs_max, notes)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (status, total, total_savings_vs_max,
+                 total_savings_vs_avg, total_savings_vs_max, notes)
             )
             order_id = cursor.lastrowid
             
@@ -489,6 +505,31 @@ class Database:
                 ))
             
             return order_id
+    
+    def update_order_status(self, order_id: int, status: str) -> bool:
+        """
+        Transition an order to a new status.
+        
+        Args:
+            order_id: Order ID
+            status: 'draft', 'submitted', 'completed', or 'cancelled'.
+                Savings dashboards only read 'completed' orders.
+            
+        Returns:
+            True if an order was updated, False if the ID was not found
+            
+        Raises:
+            ValueError: If status is not one of the allowed values
+        """
+        allowed = ('draft', 'submitted', 'completed', 'cancelled')
+        if status not in allowed:
+            raise ValueError(f"Invalid status {status!r}; must be one of {allowed}")
+        
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                "UPDATE orders SET status = ? WHERE id = ?", (status, order_id)
+            )
+            return cursor.rowcount > 0
     
     def get_order(self, order_id: int) -> Optional[Dict]:
         """Get order with items and savings details."""

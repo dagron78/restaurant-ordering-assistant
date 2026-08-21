@@ -23,6 +23,10 @@ class Config:
     # Google Gemini API
     GOOGLE_API_KEY: str = os.getenv('GOOGLE_API_KEY', '')
     
+    # Gemini models (gemini-1.5-* are retired)
+    GEMINI_MODEL_FLASH: str = os.getenv('GEMINI_MODEL_FLASH', 'gemini-2.5-flash')
+    GEMINI_MODEL_PRO: str = os.getenv('GEMINI_MODEL_PRO', 'gemini-2.5-pro')
+    
     # Email configuration
     EMAIL_USER: str = os.getenv('EMAIL_USER', '')
     EMAIL_PASS: str = os.getenv('EMAIL_PASS', '')
@@ -119,7 +123,7 @@ class Config:
                 'user': cls.USFOODS_USER,
                 'password': cls.USFOODS_PASS,
                 'url': cls.USFOODS_URL,
-                'session_file': cls.get_session_file('usfoods'),
+                'session_file': cls.get_session_file('US Foods'),
                 'email_domain': 'usfoods.com'
             }
         }

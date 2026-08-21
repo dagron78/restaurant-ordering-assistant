@@ -319,7 +319,9 @@ with tab3:
         st.divider()
         
         # US Foods session status
-        usfoods_session = Config.get_session_file('usfoods')
+        # Note: the scraper saves sessions under get_session_file('US Foods'),
+        # which produces us_foods_auth.json - use the same name here.
+        usfoods_session = Config.get_session_file('US Foods')
         if usfoods_session.exists():
             st.success("✅ US Foods session active")
             st.caption(f"File: {usfoods_session}")
