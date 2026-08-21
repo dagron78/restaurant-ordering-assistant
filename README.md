@@ -283,13 +283,24 @@ comparison = engine.compare_vendors("Heavy Cream")
 
 ### Running Tests
 ```bash
+pip install -r requirements.txt -r requirements-dev.txt
 pytest tests/
+```
+
+Tests run automatically in CI (`.github/workflows/ci.yml`) on every push to
+`master` and every pull request: ruff lint, a test matrix on Python 3.10/3.11
+with coverage, and a Docker image build.
+
+### Linting
+```bash
+ruff check .
 ```
 
 ### Code Structure
 - `core/` - Pure Python, no dependencies on Streamlit
 - `app/` - Streamlit-specific UI code
 - `workers/` - Background task workers
+- `tests/` - pytest suite; no network or API key required
 
 ## Contributing
 

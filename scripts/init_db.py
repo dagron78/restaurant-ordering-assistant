@@ -37,7 +37,7 @@ def init_database(reset: bool = False) -> None:
     
     # Ensure directories exist
     Config.ensure_directories()
-    print(f"\n✓ Directories created/verified")
+    print("\n✓ Directories created/verified")
     print(f"  Database path: {Config.DATABASE_PATH}")
     print(f"  Sessions path: {Config.SESSIONS_PATH}")
     print(f"  Temp path: {Config.TEMP_PATH}")
@@ -46,17 +46,17 @@ def init_database(reset: bool = False) -> None:
     db = Database()
     
     if reset and Config.DATABASE_PATH.exists():
-        print(f"\n⚠️  Resetting database (deleting existing data)...")
+        print("\n⚠️  Resetting database (deleting existing data)...")
         Config.DATABASE_PATH.unlink()
-        print(f"✓ Old database deleted")
+        print("✓ Old database deleted")
     
-    print(f"\n📦 Initializing database schema...")
+    print("\n📦 Initializing database schema...")
     db.init_database()
-    print(f"✓ Schema created successfully")
+    print("✓ Schema created successfully")
     
     # Verify vendors were created
     vendors = db.get_all_vendors()
-    print(f"\n📋 Default vendors:")
+    print("\n📋 Default vendors:")
     for v in vendors:
         print(f"   - {v['name']} ({v.get('email_domain', 'no domain')})")
     
@@ -79,7 +79,7 @@ def init_database(reset: bool = False) -> None:
         print(f"\n📝 Created sample preferences file: {Config.PREFERENCES_PATH}")
     
     # Validate configuration
-    print(f"\n🔍 Configuration validation:")
+    print("\n🔍 Configuration validation:")
     validation = Config.validate()
     
     status_icons = {True: '✓', False: '✗'}
@@ -89,24 +89,40 @@ def init_database(reset: bool = False) -> None:
     print(f"   {status_icons[validation['usfoods']]} US Foods credentials configured")
     
     if not validation['gemini_api']:
-        print(f"\n⚠️  Warning: Gemini API key not configured.")
-        print(f"   Copy .env.example to .env and add your API key.")
+        print("\n⚠️  Warning: Gemini API key not configured.")
+        print("   Copy .env.example to .env and add your API key.")
     
     print(f"\n{'=' * 50}")
-    print(f"Database initialization complete!")
+    print("Database initialization complete!")
     print(f"{'=' * 50}")
     
     if validation['all_valid']:
-        print(f"\n🚀 Ready to run! Start the app with:")
-        print(f"   streamlit run app/main.py")
+        print("\n🚀 Ready to run! Start the app with:")
+        print("   streamlit run app/main.py")
     else:
-        print(f"\n⚠️  Please configure missing credentials in .env file")
-        print(f"   See .env.example for required variables")
+        print("\n⚠️  Please configure missing credentials in .env file")
+        print("   See .env.example for required variables")
 
 
-def add_sample_data() -> None:
-    """Add sample data for testing."""
-    db = Database()
+def add_sample_data(db: Database = None, days: int = 30) -> None:
+    """
+    Add sample data with simulated price history.
+    
+    Prices are spread across the past `days` days with a gentle drift so
+    the trend chart and deal/spike indicators have something real to show
+    on first run (every row stamped today would read "stable" forever).
+    
+    Args:
+        db: Database instance (creates new if not provided)
+        days: Number of days of history to simulate
+    """
+    import random
+    from datetime import date, timedelta
+    
+    # Deterministic so demos and screenshots are reproducible
+    random.seed(42)
+    
+    db = db or Database()
     
     print("\n📊 Adding sample data for testing...")
     
@@ -129,12 +145,6 @@ def add_sample_data() -> None:
     
     print(f"   ✓ Added {len(sample_items)} sample items")
     
-    # Sample prices (simulating historical data)
-    import random
-    from datetime import datetime, timedelta
-    
-    vendors = ['Sysco', 'US Foods']
-    
     base_prices = {
         'Heavy Cream 40%': 24.50,
         'Whole Milk': 3.50,
@@ -148,29 +158,44 @@ def add_sample_data() -> None:
         'Atlantic Salmon': 12.50,
     }
     
+    vendors = ['Sysco', 'US Foods']
+    today = date.today()
+    
     price_count = 0
     for item_name, base_price in base_prices.items():
+        item = db.get_item(name=item_name)
+        unit = item.get('default_unit', 'Each') if item else 'Each'
+        
         for vendor in vendors:
-            # Add some variation between vendors
+            # Per-vendor level and drift direction across the window
             vendor_modifier = random.uniform(0.95, 1.05)
-            price = round(base_price * vendor_modifier, 2)
+            total_drift = random.uniform(-0.15, 0.15)
             
-            # Get item for unit
-            item = db.get_item(name=item_name)
-            unit = item.get('default_unit', 'Each') if item else 'Each'
-            
-            db.add_price(
-                item_name=item_name,
-                vendor_name=vendor,
-                price=price,
-                unit=unit,
-                source='manual',
-                confidence=1.0
-            )
-            price_count += 1
+            # Oldest first: insert order defines which row is "latest"
+            for day_offset in range(days - 1, -1, -1):
+                progress = (days - 1 - day_offset) / max(days - 1, 1)
+                daily_noise = random.uniform(0.98, 1.02)
+                price = round(
+                    base_price * vendor_modifier
+                    * (1 + total_drift * progress)
+                    * daily_noise,
+                    2
+                )
+                
+                recorded = (today - timedelta(days=day_offset)).isoformat()
+                db.add_price(
+                    item_name=item_name,
+                    vendor_name=vendor,
+                    price=price,
+                    unit=unit,
+                    source='manual',
+                    confidence=1.0,
+                    date_recorded=recorded
+                )
+                price_count += 1
     
-    print(f"   ✓ Added {price_count} sample prices")
-    print(f"\n✅ Sample data added successfully!")
+    print(f"   ✓ Added {price_count} sample prices across {days} days")
+    print("\n✅ Sample data added successfully!")
 
 
 if __name__ == '__main__':

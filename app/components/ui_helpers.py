@@ -5,7 +5,7 @@ Reusable Streamlit components and formatting utilities.
 """
 
 import streamlit as st
-from typing import List, Dict, Any
+from typing import List, Dict
 
 
 def trend_badge(trend: str, change_pct: float = None) -> str:

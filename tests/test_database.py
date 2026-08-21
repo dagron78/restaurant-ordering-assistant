@@ -74,7 +74,7 @@ class TestOrderStatusAndSavings:
         vendor = db.get_or_create_vendor("Sysco")
         items = [dict(self.ORDER_ITEMS[0], item_id=item, vendor_id=vendor)]
 
-        order_id = db.create_order(items, status="completed")
+        db.create_order(items, status="completed")
 
         totals = db.get_total_savings()
         assert totals["total_orders"] == 1
@@ -137,7 +137,7 @@ class TestForeignKeyEnforcement:
 
     def test_cascade_delete_removes_price_history(self, db):
         item_id = db.add_item("Heavy Cream", category="Dairy")
-        vendor = db.get_or_create_vendor("Sysco")
+        db.get_or_create_vendor("Sysco")
         db.add_price("Heavy Cream", "Sysco", 24.50, "Case")
 
         with db.get_connection() as conn:

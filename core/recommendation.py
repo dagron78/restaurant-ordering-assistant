@@ -5,7 +5,7 @@ Combines price data, trend analysis, and user preferences
 to generate intelligent ordering recommendations.
 """
 
-from typing import List, Dict, Optional
+from typing import List, Dict
 from pathlib import Path
 
 from .config import Config

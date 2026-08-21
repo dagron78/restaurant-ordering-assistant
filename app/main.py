@@ -5,6 +5,7 @@ Streamlit-based web interface for managing restaurant ordering.
 Run with: streamlit run app/main.py
 """
 
+import base64
 import sys
 from pathlib import Path
 
@@ -47,7 +48,6 @@ def load_css():
 load_css()
 
 # Helper to read image as base64
-import base64
 def get_image_base64(path):
     with open(path, "rb") as f:
         data = f.read()
@@ -160,7 +160,8 @@ col1, col2 = st.columns(2)
 with col1:
     st.markdown("**API & Services**")
     
-    status_emoji = lambda x: "✅" if x else "❌"
+    def status_emoji(ok: bool) -> str:
+        return "✅" if ok else "❌"
     
     st.markdown(f"{status_emoji(validation['gemini_api'])} Gemini API Key")
     st.markdown(f"{status_emoji(validation['email'])} Email Credentials")
