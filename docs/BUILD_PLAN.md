@@ -200,6 +200,13 @@ intent, not outcome.
 
 ## Phase 4 · Trust the inputs — F-34, F-35
 
+> **STATUS: DONE** — `phase/4-trust-the-inputs`. Positive signed-in probe
+> (fail-closed; login-form absence is never auth) gates every scrape and
+> re-probes every N items; mid-scrape lapse = defined partial outcome with
+> earlier rows kept; start-auth failure logs `failed` with zero prices.
+> Refresh documented workstation-only with real paths. Gate:
+> tests/test_session_gate.py.
+
 Phase 0's and F-04's correctness work only matters if the page being scraped is a
 logged-in page. `has_valid_session()` returns true whenever the file exists and an
 optimistic 30-day stamp hasn't passed, so an expired cookie scrapes a logged-out

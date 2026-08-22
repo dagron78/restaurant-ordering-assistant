@@ -131,6 +131,9 @@ class VendorScraper(ABC):
         
         Opens a browser window for the user to log in manually.
         Saves the session state for future automated runs.
+
+        NOTE: requires a display and an interactive TTY - run this on a
+        workstation, never inside the headless container.
         
         Args:
             login_url: Optional specific login URL

@@ -205,13 +205,23 @@ python workers/scheduler.py
 ### Web Scraper
 
 #### Refresh Login Sessions
-```bash
-# Sysco
-python workers/web_scraper.py --refresh sysco
 
-# US Foods
+Run these on a **workstation with a display** — the refresh opens a visible
+browser and waits for you to press Enter, so it cannot run inside the
+Docker container (headless, no TTY). Sessions are saved to
+`data/sessions/<vendor>_auth.json`, which the container mounts via the
+`./data:/app/data` volume.
+
+```bash
+# On your workstation (not in the container):
+python workers/web_scraper.py --refresh sysco
 python workers/web_scraper.py --refresh usfoods
 ```
+
+Sessions are validated positively before every scrape: the run aborts —
+and records `failed` in the processing log — unless the live page shows a
+signed-in marker. An expired session can never silently scrape public
+catalog pricing.
 
 #### Run Scrape
 ```bash
