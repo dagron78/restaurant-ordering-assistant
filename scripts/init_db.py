@@ -14,9 +14,6 @@ Options:
     --reset    Drop all tables and recreate (WARNING: deletes all data)
 """
 
-import logging
-logging.basicConfig(level=logging.INFO,
-                    format='%(asctime)s %(name)s %(levelname)s %(message)s')
 
 import sys
 from pathlib import Path
@@ -26,6 +23,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.config import Config
 from core.database import Database
+import logging
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s %(name)s %(levelname)s %(message)s')
+
 
 
 def init_database(reset: bool = False) -> None:

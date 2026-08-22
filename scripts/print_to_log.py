@@ -8,7 +8,7 @@ LEVEL_HINTS = ('error', 'fail', '✗', 'skipping', 'dropping',
 
 
 def _char_offset(src_lines, lineno, col):
-    return sum(len(l) for l in src_lines[:lineno - 1]) + col
+    return sum(len(ln) for ln in src_lines[:lineno - 1]) + col
 
 
 def transform(path: pathlib.Path) -> int:

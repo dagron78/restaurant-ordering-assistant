@@ -769,11 +769,10 @@ def run_weekly_scrape() -> Dict:
     return combined_results
 
 
-import logging
-logging.basicConfig(level=logging.INFO,
-                    format='%(asctime)s %(name)s %(levelname)s %(message)s')
-
 if __name__ == '__main__':
+    import logging  # noqa: E402
+    logging.basicConfig(level=logging.INFO,
+                        format='%(asctime)s %(name)s %(levelname)s %(message)s')
     import argparse
     
     parser = argparse.ArgumentParser(description='Vendor web scraper')

@@ -5,9 +5,6 @@ Streamlit-based web interface for managing restaurant ordering.
 Run with: streamlit run app/main.py
 """
 
-import logging
-logging.basicConfig(level=logging.INFO,
-                    format='%(asctime)s %(name)s %(levelname)s %(message)s')
 
 import base64
 import sys
@@ -21,6 +18,10 @@ import streamlit as st
 from core.config import Config
 from core.database import Database
 from app.components.auth_gate import require_login
+
+import logging
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s %(name)s %(levelname)s %(message)s')
 
 # Page configuration
 st.set_page_config(
