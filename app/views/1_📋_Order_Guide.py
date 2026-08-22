@@ -106,6 +106,10 @@ with col6:
 st.divider()
 
 # Group recommendations by category
+# Search/filter (#30 B)
+search = st.text_input("🔍 Search items", placeholder="Filter by name...",
+                        label_visibility="collapsed")
+
 categories = {}
 for rec in recommendations:
     cat = rec.get('category') or 'Uncategorized'
@@ -133,10 +137,6 @@ css_path = Path(__file__).parent.parent / 'assets' / 'style.css'
 if css_path.exists():
     with open(css_path, 'r') as f:
         st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
-
-# Search/filter (#30 B)
-search = st.text_input("🔍 Search items", placeholder="Filter by name...",
-                        label_visibility="collapsed")
 
 # View Toggle
 col_t1, col_t2 = st.columns([6, 2])
