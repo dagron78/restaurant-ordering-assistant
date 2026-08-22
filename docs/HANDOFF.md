@@ -1,7 +1,7 @@
 # Handoff
 
 *For whoever picks this up next — a fresh agent session, a new contributor, or the
-same people after a gap. Written 22 Aug 2026 at `master @ 152de62`.*
+same people after a gap. Written 22 Aug 2026 at `master @ fd214cb`, with the build feature-complete.*
 
 ## What this is
 
@@ -23,14 +23,13 @@ single largest gap between this build and a working weekly cycle.
 
 | | |
 |---|---|
-| Branch | `master @ 152de62`, 71 commits, 23 merged PRs |
+| Branch | `master @ fd214cb`, 78 commits, 24 merged PRs |
 | Tests | 242 passing, 1 skipped (deliberate live-API test), 3 deselected |
 | Python | 3.11 everywhere — `.python-version`, `requires-python`, ruff target, CI, Docker |
 | Local venv | `./venv` — **must be uv-managed 3.11**, not the Xcode 3.9 that caused #13 |
 | CI | lint · tests · docker build · warnings-as-errors |
 | Original review | 40 findings in `docs/CODE_REVIEW.md`, all Fixed or Won't-fix bar one partial |
-| Phases 0–6 + intake | merged |
-| Phase 7 | in progress (#33) |
+| Phases 0–7 + intake | all merged — the build is feature-complete |
 
 ## Establish state in sixty seconds
 
@@ -108,8 +107,8 @@ Cheap reproductions live in `docs/repro/` — stdlib `sqlite3` against
 
 | | Needs |
 |---|---|
-| **#33** Phase 7 | in progress: dead config, structural UI, intake status on the landing page, the four-screen tour, then `AppTest` + walkthrough re-run |
-| **#30** Front-end | section A merged; B, C, D fold into #33 |
+| **slow_ui tests** | **three of four `AppTest` UI tests never run.** `pyproject.toml` sets `addopts = "-q -m 'not slow_ui'"` and no job runs `-m slow_ui`, so the auth-gate test — the control Phase 4 made fail-closed — is deselected in every run. `-rs` shows skips, not deselections, so nothing reports it. Add a CI job that runs the marker |
+| **dead filterwarnings** | `pyproject.toml` still ignores `google.generativeai` deprecations "pending migration" — that migration completed in Phase 6 |
 | **#26** Auth selectors | **credentials.** `AUTH_POSITIVE_SELECTORS` are placeholders; the first real scrape aborts until they are tuned to a live signed-in DOM. Fails closed, so it blocks rather than corrupts |
 | **#18** Multi-vendor | largely absorbed by intake; the scraper-per-vendor remainder stands |
 | **#28** Intake | merged at `152de62` but the issue is still open — close it |
