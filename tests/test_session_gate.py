@@ -48,6 +48,16 @@ class FakePage:
     def content(self):
         return '<html></html>'
 
+    # navigation surface used by scrape_all_items
+    def goto(self, url):
+        self.last_url = url
+
+    def wait_for_load_state(self, state=None):
+        pass
+
+    def set_default_timeout(self, t):
+        pass
+
 
 def logged_in_page():
     """Positive marker present; no login form."""
@@ -77,41 +87,22 @@ def scraper(db):
     return s
 
 
-def _fake_playwright(monkeypatch, pages_by_url):
-    """Patch sync_playwright inside workers.web_scraper to serve fake pages."""
-    import workers.web_scraper as ws
-
+def _fake_playwright(monkeypatch, current_page):
+    """Patch playwright.sync_api.sync_playwright (function-local import in
+    scrape_all_items) to serve one fake page for the whole run."""
     class FakeBrowser:
-        def __init__(self): self.closed = False
         def new_context(self, storage_state=None): return self
-        def new_page(self): return PageProxy(pages_by_url)
-        def close(self): self.closed = True
-
-    class PageProxy:
-        def __init__(self, registry):
-            self.registry = registry
-            self.calls = []
-            self.set_default_timeout = lambda t: None
-        def __getattr__(self, name):
-            # route page methods to whichever fake page matches last URL
-            real = self.registry['current']
-            return getattr(real, name)
-        def goto(self, url):
-            self.calls.append(url)
-            key = next((k for k in self.registry if k != 'current' and k in url), 'default')
-            self.registry['current'] = self.registry[key]
-        def set_default_timeout(self, t): pass
-
+        def new_page(self): return current_page
+        def close(self): pass
     class FakePW:
+        @property
         def chromium(self): return self
         def launch(self, headless=True): return FakeBrowser()
-
-    monkeypatch.setattr(ws, 'sync_playwright', lambda: _Ctx(FakePW()))
-
     class _Ctx:
-        def __init__(self, pw): self.pw = pw
-        def __enter__(self): return self.pw
+        def __enter__(self): return FakePW()
         def __exit__(self, *a): return False
+    monkeypatch.setattr('playwright.sync_api.sync_playwright',
+                        lambda: _Ctx())
 
 
 def _processing_rows(db):
@@ -124,7 +115,7 @@ def _processing_rows(db):
 class TestAuthProbeGate:
     def test_logged_out_aborts_with_zero_prices_and_failed_log(self, scraper, monkeypatch):
         page = logged_out_page()
-        _fake_playwright(monkeypatch, {'default': page, 'current': page})
+        _fake_playwright(monkeypatch, page)
 
         results = scraper.scrape_all_items()
 
@@ -143,7 +134,7 @@ class TestAuthProbeGate:
 
     def test_neither_marker_nor_login_form_fails_closed(self, scraper, monkeypatch):
         page = neither_page()
-        _fake_playwright(monkeypatch, {'default': page, 'current': page})
+        _fake_playwright(monkeypatch, page)
 
         results = scraper.scrape_all_items()
 
@@ -157,7 +148,7 @@ class TestAuthProbeGate:
 
     def test_logged_in_stores_prices_normally(self, scraper, monkeypatch):
         page = logged_in_page()
-        _fake_playwright(monkeypatch, {'default': page, 'current': page})
+        _fake_playwright(monkeypatch, page)
 
         results = scraper.scrape_all_items()
 
@@ -176,7 +167,7 @@ class TestAuthProbeGate:
         assert scraper.has_valid_session() is True          # stamp says fine
 
         page = logged_out_page()
-        _fake_playwright(monkeypatch, {'default': page, 'current': page})
+        _fake_playwright(monkeypatch, page)
         results = scraper.scrape_all_items()
 
         assert results['success'] is False                  # probe overruled it
@@ -186,39 +177,30 @@ class TestAuthProbeGate:
 class TestMidScrapeExpiry:
     def test_partial_outcome_is_defined(self, scraper, monkeypatch):
         """Session lapses after the first item: earlier rows stay (they were
-        fetched authenticated), run is recorded partial with an error that
-        says so - never silently identical to a full clean scrape."""
-        good = logged_in_page()
-        bad = logged_out_page()
-        registry = {'default': good, 'current': good, 'expire_after': 1}
-
-        import workers.web_scraper as ws
-
-        real_verify = SyscoScraper._verify_logged_in
+        fetched under a verified session), run recorded PARTIAL with an
+        error saying so - never silently identical to a clean scrape."""
+        state = {"probes": 0}
 
         def flaky(self, page):
-            done = len([r for r in
-                        (scraper_results.get('prices') or [])]) \
-                if False else getattr(self, '_probes', 0)
-            self._probes = done + 1
-            if self._probes > registry['expire_after']:
-                return False, 'signed-in marker not found'
-            return True, 'ok'
+            state["probes"] += 1
+            if state["probes"] >= 2:     # start-probe ok; next probe lapses
+                return False, "signed-in marker not found"
+            return True, "ok"
 
-        monkeypatch.setattr(SyscoScraper, '_verify_logged_in', flaky)
-
-        # shrink re-probe cadence so expiry lands between items
+        monkeypatch.setattr(SyscoScraper, "_verify_logged_in", flaky)
         scraper.REPROBE_EVERY = 1
 
-        _fake_playwright(monkeypatch, {'default': good, 'current': good})
+        good = logged_in_page()
+        _fake_playwright(monkeypatch, good)
 
-        scraper_results = scraper.scrape_all_items()
+        results = scraper.scrape_all_items()
 
-        monkeypatch.setattr(SyscoScraper, '_verify_logged_in', real_verify)
+        monkeypatch.setattr(SyscoScraper, "_verify_logged_in",
+                            SyscoScraper._verify_logged_in)
 
-        assert scraper_results['success'] is False          # not a clean run
-        assert scraper_results['session_expired_after_items'] == 1
-        assert len(scraper_results['prices']) == 1          # earlier row kept
+        assert results["success"] is False              # not a clean run
+        assert results["session_expired_after_items"] == 1
+        assert len(results["prices"]) == 1              # earlier row kept
         row = _processing_rows(scraper.db)[0]
-        assert row['status'] == 'partial'
-        assert 'expired' in (row['error_message'] or '').lower()
+        assert row["status"] == "partial"
+        assert "expired" in (row["error_message"] or "").lower()
