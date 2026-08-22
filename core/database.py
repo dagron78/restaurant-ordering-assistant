@@ -23,7 +23,7 @@ LATEST_PRICE_RANK_ORDER = "ph.date_recorded DESC, ph.created_at DESC, ph.id DESC
 # Highest schema version implemented by scripts/migrations/. Bump it together
 # with a new NNN_*.sql file there; PRAGMA user_version on real databases
 # records how far each one has come.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 MIGRATIONS_DIR = Config.BASE_DIR / "scripts" / "migrations"
 
 
