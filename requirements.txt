@@ -1,10 +1,10 @@
 # Restaurant Ordering Assistant Dependencies
 
 # Web Framework
-streamlit>=1.30.0
+streamlit>=1.49,<2
 
-# AI Engine
-google-generativeai>=0.3.0
+# AI Engine (google-generativeai is EOL upstream; new SDK)
+google-genai>=1.0,<2
 
 # Web Scraping
 playwright>=1.40.0

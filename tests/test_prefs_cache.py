@@ -126,9 +126,8 @@ class TestGoldenParserContract:
         for f in files:
             golden = json.loads(f.read_text())
             monkeypatch.setattr(
-                engine, '_call_with_retry',
-                lambda model, content, generation_config=None, _r=golden["response"]:
-                _r)
+                engine, '_send_to_model',
+                lambda model_name, contents, _r=golden["response"]: _r)
             rules = engine.parse_preferences(golden["prose"])
             for expected in golden["expect"]:
                 assert any(

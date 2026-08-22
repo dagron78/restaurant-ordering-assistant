@@ -10,10 +10,13 @@ Handles all AI-powered operations:
 
 import json
 import time
-from typing import Optional, List, Dict, Any, Union
+from typing import Optional, List, Dict, Union
 from pathlib import Path
 
-import google.generativeai as genai
+from functools import partial
+
+from google import genai
+from google.genai import types as gtypes
 import PIL.Image
 
 from .config import Config
@@ -30,55 +33,48 @@ class GeminiEngine:
         if not Config.GOOGLE_API_KEY:
             raise ValueError("GOOGLE_API_KEY not configured. Check your .env file.")
         
-        genai.configure(api_key=Config.GOOGLE_API_KEY)
-        
-        # Use Flash for speed, Pro for complex reasoning.
-        # gemini-1.5-* are retired; default to current generation and
-        # allow override via environment variables.
-        self.model_flash = genai.GenerativeModel(Config.GEMINI_MODEL_FLASH)
-        self.model_pro = genai.GenerativeModel(Config.GEMINI_MODEL_PRO)
+        self._client = genai.Client(api_key=Config.GOOGLE_API_KEY)
+
+        # Use Flash for speed, Pro for complex reasoning (gemini-2.5 default).
+        self.flash_model = Config.GEMINI_MODEL_FLASH
+        self.pro_model = Config.GEMINI_MODEL_PRO
         
         # Retry configuration
         self.max_retries = 3
         self.retry_delay = 2
     
-    def _call_with_retry(self, model: Any, content: Any, 
-                         generation_config: dict = None) -> str:
+    def _send_to_model(self, model_name: str, contents) -> str:
+        """Single seam to the wire: tests stub THIS method."""
+        response = self._client.models.generate_content(
+            model=model_name,
+            contents=contents,
+            config=gtypes.GenerateContentConfig(temperature=0.0),
+        )
+        return response.text
+
+    def _call_with_retry(self, send):
         """
-        Call Gemini API with exponential backoff retry.
-        
+        Run send() with exponential backoff (delay * 2**attempt).
+
         Args:
-            model: Gemini model instance
-            content: Content to send (text, image, or list)
-            generation_config: Optional generation configuration
-            
-        Returns:
-            Response text from Gemini
+            send: zero-arg callable returning response text. Callers close
+                over their model name and contents via _send_to_model.
         """
         last_error = None
-        
+
         for attempt in range(self.max_retries):
             try:
-                if generation_config:
-                    response = model.generate_content(
-                        content,
-                        generation_config=generation_config
-                    )
-                else:
-                    response = model.generate_content(content)
-                
-                return response.text
-                
+                return send()
             except Exception as e:
                 last_error = e
                 if attempt < self.max_retries - 1:
-                    # Exponential backoff: 2s, 4s, 8s with default retry_delay=2
                     wait_time = self.retry_delay * (2 ** attempt)
                     print(f"API call failed, retrying in {wait_time}s: {e}")
                     time.sleep(wait_time)
-        
-        raise Exception(f"API call failed after {self.max_retries} attempts: {last_error}")
-    
+
+        raise Exception(
+            f"API call failed after {self.max_retries} attempts: {last_error}")
+
     def _clean_json_response(self, text: str) -> str:
         """
         Clean markdown formatting from JSON response.
@@ -146,13 +142,15 @@ class GeminiEngine:
         # PDFs cannot be opened with PIL; send raw bytes with a MIME type.
         # Gemini accepts inline parts for both images and PDFs.
         if file_path.suffix.lower() == '.pdf':
-            document = [{'mime_type': 'application/pdf',
-                         'data': file_path.read_bytes()}]
+            document = [gtypes.Part.from_bytes(
+                data=file_path.read_bytes(),
+                mime_type='application/pdf')]
         else:
             document = [PIL.Image.open(file_path)]
         
         # Use Pro model for better OCR accuracy
-        response = self._call_with_retry(self.model_pro, [prompt] + document)
+        send = partial(self._send_to_model, self.pro_model, [prompt] + document)
+        response = self._call_with_retry(send)
         
         # Parse JSON
         clean_json = self._clean_json_response(response)
@@ -263,7 +261,8 @@ class GeminiEngine:
         - Return ONLY valid JSON array, no additional text.
         """
         
-        response = self._call_with_retry(self.model_flash, prompt)
+        send = partial(self._send_to_model, self.flash_model, prompt)
+        response = self._call_with_retry(send)
         if capture_raw is not None:
             try:
                 capture_raw(response)
@@ -338,7 +337,8 @@ class GeminiEngine:
         Return ONLY valid JSON, no additional text.
         """
         
-        response = self._call_with_retry(self.model_flash, prompt)
+        send = partial(self._send_to_model, self.flash_model, prompt)
+        response = self._call_with_retry(send)
         clean_json = self._clean_json_response(response)
         
         try:
@@ -384,7 +384,8 @@ class GeminiEngine:
         If unknown, return "Unknown".
         """
         
-        response = self._call_with_retry(self.model_flash, prompt)
+        send = partial(self._send_to_model, self.flash_model, prompt)
+        response = self._call_with_retry(send)
         return response.strip() if response else None
     
     # Sanity bounds for a single price line - anything outside is treated
