@@ -10,18 +10,19 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from app.components.auth_gate import gate_or_stop
+
 import streamlit as st
 import pandas as pd
 from datetime import datetime
 
-from app.components.auth_gate import require_login
 from core.database import Database, pick_cheapest_alternative
 from core.exports import build_order_pdf, build_vendor_email_draft
 from core.recommendation import RecommendationEngine
 
-st.set_page_config(page_title="Order Guide", page_icon="📋", layout="wide")
 
-require_login()
+
+gate_or_stop()
 
 st.title("📋 Weekly Order Guide")
 st.markdown("*AI-powered recommendations based on prices and your preferences*")

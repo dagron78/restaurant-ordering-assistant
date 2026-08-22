@@ -86,7 +86,7 @@ unevidenced. This is the cheapest high-information step on the list.
 **Work**
 
 1. `python scripts/init_db.py --reset --sample-data`, then
-   `streamlit run app/main.py`, with `APP_PASSWORD` set and then unset.
+   `streamlit run app/Home.py`, with `APP_PASSWORD` set and then unset.
 2. Walk all three pages and every control: item add, quantity entry, order save,
    the Trends range slider, Settings upload, the preference chips, the Danger Zone
    confirmations.

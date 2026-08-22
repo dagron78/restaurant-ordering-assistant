@@ -66,7 +66,7 @@ Captured from a live instance during the Phase 1 runtime walkthrough
 
 6. **Run the application**
    ```bash
-   streamlit run app/main.py
+   streamlit run app/Home.py
    ```
 
 7. **Open in browser**: http://localhost:8501

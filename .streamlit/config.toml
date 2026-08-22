@@ -1,0 +1,7 @@
+# Client-facing chrome (issue #30 section A)
+[client]
+toolbarMode = "minimal"   # removes the Deploy button
+
+[theme]
+# Red reads destructive; Sign in / Save are the safest controls in the product.
+primaryColor = "#2E7D32"

@@ -14,14 +14,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 import streamlit as st
 import pandas as pd
 
-from app.components.auth_gate import require_login
+from app.components.auth_gate import gate_or_stop
 from core.config import Config
 from core.database import Database
 from core.ai_engine import GeminiEngine
 
-st.set_page_config(page_title="Settings", page_icon="⚙️", layout="wide")
 
-require_login()
+
+gate_or_stop()
 
 st.title("⚙️ Settings")
 
