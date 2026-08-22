@@ -107,6 +107,13 @@ so animation frames are frozen.*
 
 ## Phase 2 · Make the numbers honest — F-19, F-21, F-22
 
+> **STATUS: DONE** — `phase/2-honest-numbers`. Cheapest-alternative basis
+> (min over other vendors, N-vendor correct), baselines frozen at write time,
+> migration 001 with `PRAGMA user_version` + legacy `savings_basis` stamping,
+> structural-identity gate test green, per-vendor trend baselines split from
+> the market average. See issue #17 and tests/test_honest_savings.py +
+> tests/test_migration.py.
+
 The decision above resolves the semantics. The unit-summing bug (F-21) then falls
 out for free: **extended dollars are additive, per-unit deltas are not**. Multiply
 by quantity before summing and a per-case saving and a per-pound saving can share
@@ -168,6 +175,15 @@ actually said.
 
 **Gate:** a rule-matrix test — every rule type, conditions both true and false,
 two rules in conflict, and a rule referencing an item that no longer exists.
+
+**Preference-parsing caveat (added after Phase 1):** the Phase 1 boot matrix
+with a working API key proved only that Gemini round-trips succeed — success
+was measured as *absence of errors* while `data/preferences.txt` was all
+commented examples, which almost certainly parsed to empty. The Phase 3 gate
+must therefore use **real preference prose** and **assert on the parsed
+predicates themselves**, not on the absence of exceptions. Same lesson as the
+provenance note in CODE_REVIEW.md: diff/exception inspection establishes
+intent, not outcome.
 
 ---
 

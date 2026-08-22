@@ -15,7 +15,7 @@ import pandas as pd
 from datetime import datetime
 
 from app.components.auth_gate import require_login
-from core.database import Database
+from core.database import Database, pick_cheapest_alternative
 from core.recommendation import RecommendationEngine
 
 st.set_page_config(page_title="Order Guide", page_icon="📋", layout="wide")
@@ -62,8 +62,10 @@ recommendations = get_recommendations()
 # Flash message from a completed save (post-rerun so the form shows cleared)
 if 'order_saved_flash' in st.session_state:
     flash = st.session_state.pop('order_saved_flash')
+    net_note = f"${flash['savings']:+,.2f}" if flash['savings'] else "$0.00"
     st.success(f"✅ Order #{flash['order_id']} saved! "
-               f"Total savings: ${flash['savings']:.2f}")
+               f"Net {net_note} vs other vendors' best quotes "
+               f"(over {flash['covered']} of {flash['total_lines']} lines)")
     if flash['dropped']:
         st.warning(f"⚠️ {flash['dropped']} item(s) skipped (missing vendor/item data).")
 
@@ -205,6 +207,10 @@ with st.form("order_form"):
                         'max_price': item.get('max_price') or item['price'] or 0,
                         'total': qty * (item['price'] or 0)
                     })
+                    _alt = pick_cheapest_alternative(
+                        item.get('all_prices') or [], item['recommended_vendor'])
+                    order_items[-1]['alt_price'] = _alt['price'] if _alt else None
+                    order_items[-1]['alt_vendor'] = _alt['vendor'] if _alt else None
         
         else:  # Card View (Mobile)
             for item in items:
@@ -261,6 +267,10 @@ with st.form("order_form"):
                             'max_price': item.get('max_price') or item['price'] or 0,
                             'total': qty * (item['price'] or 0)
                         })
+                        _alt_c = pick_cheapest_alternative(
+                            item.get('all_prices') or [], item['recommended_vendor'])
+                        order_items[-1]['alt_price'] = _alt_c['price'] if _alt_c else None
+                        order_items[-1]['alt_vendor'] = _alt_c['vendor'] if _alt_c else None
         
     st.divider()
 
@@ -284,19 +294,34 @@ if (generate_summary or save_order) and order_items:
     st.markdown('<div class="sticky-footer">', unsafe_allow_html=True)
     st.subheader("📊 Order Summary")
     
-    # Savings highlight banner
-    if savings_info['total_savings_vs_max'] > 0:
-        st.success(f"💰 **You're saving ${savings_info['total_savings_vs_max']:.2f}** by choosing optimal vendors! ({savings_info['savings_percentage']:.1f}% savings)")
+    # Headline banner (#17): versus each line's cheapest alternative quote.
+    covered = savings_info['lines_total'] - savings_info['lines_excluded']
+    net_alt = savings_info['total_savings_vs_alt']
+    if net_alt > 0:
+        st.success(f"💰 **Saving ${net_alt:.2f}** vs other vendors' best quotes "
+                   f"(over {covered} of {savings_info['lines_total']} lines)")
+    elif net_alt < 0:
+        st.warning(f"⚠️ **Paying ${abs(net_alt):.2f} more** than other vendors' "
+                   f"best quotes on this order ({covered} of "
+                   f"{savings_info['lines_total']} lines compared)")
+    else:
+        st.info("Even with the cheapest alternative so far.")
+    
+    if savings_info['lines_excluded']:
+        st.caption(f"ℹ️ {savings_info['lines_excluded']} line(s) had no alternative "
+                   "quote and are excluded from savings.")
     
     # Create summary dataframe with savings
     df = pd.DataFrame(order_items)
     df['savings'] = df.apply(
-        lambda row: row['qty'] * (row['max_price'] - row['unit_price'])
-        if row['max_price'] > row['unit_price'] else 0,
+        lambda row: (row['qty'] * (row['alt_price'] - row['unit_price']))
+        if row.get('alt_price') is not None else None,
         axis=1
     )
     df['total_display'] = df['total'].apply(lambda x: f"${x:.2f}")
-    df['savings_display'] = df['savings'].apply(lambda x: f"${x:.2f}" if x > 0 else "-")
+    df['savings_display'] = df['savings'].apply(
+        lambda x: f"${x:,.2f}" if x is not None and x > 0
+        else (f"-${abs(x):,.2f}" if x is not None and x < 0 else "—"))
     
     st.dataframe(
         df[['item', 'vendor', 'qty', 'unit', 'unit_price', 'total_display', 'savings_display']].rename(columns={
@@ -306,7 +331,7 @@ if (generate_summary or save_order) and order_items:
             'unit': 'Unit',
             'unit_price': 'Unit Price',
             'total_display': 'Total',
-            'savings_display': '💰 Saved'
+            'savings_display': 'Net vs Alternative'
         }),
         use_container_width=True,
         hide_index=True
@@ -314,19 +339,20 @@ if (generate_summary or save_order) and order_items:
     
     # Totals with savings
     total_amount = savings_info['total_cost']
-    potential_max = savings_info['potential_max_cost']
     
     col1, col2, col3 = st.columns(3)
     with col1:
         st.metric("Order Total", f"${total_amount:.2f}")
     with col2:
-        st.metric("💰 Total Savings", f"${savings_info['total_savings_vs_max']:.2f}",
-                  delta=f"{savings_info['savings_percentage']:.1f}%")
-        st.caption("vs most expensive vendor - the optimistic baseline")
+        net = savings_info['total_savings_vs_alt']
+        st.metric("💰 Net vs Alternatives", f"${net:+,.2f}",
+                  delta=f"{(net / total_amount * 100):.1f}%" if total_amount else None)
+        st.caption("vs each line's cheapest alternative quote")
     with col3:
-        st.metric("Would Have Paid", f"${potential_max:.2f}",
-                  delta=f"-${savings_info['total_savings_vs_max']:.2f}",
-                  delta_color="inverse")
+        covered = savings_info['lines_total'] - savings_info['lines_excluded']
+        st.metric("Lines Compared", f"{covered} of {savings_info['lines_total']}",
+                  help="Lines without an alternative quote are excluded "
+                       "from savings, not counted as zero")
     
     st.markdown('</div>', unsafe_allow_html=True)
     
@@ -339,7 +365,8 @@ if (generate_summary or save_order) and order_items:
             vendor_totals[vendor] = {'items': 0, 'total': 0, 'savings': 0}
         vendor_totals[vendor]['items'] += 1
         vendor_totals[vendor]['total'] += item['total']
-        vendor_totals[vendor]['savings'] += item['qty'] * max(0, (item['max_price'] - item['unit_price']))
+        if item.get('alt_price') is not None:
+            vendor_totals[vendor]['savings'] += item['qty'] * (item['alt_price'] - item['unit_price'])
     
     for vendor, data in vendor_totals.items():
         savings_text = f" (💰 saved ${data['savings']:.2f})" if data['savings'] > 0 else ""
@@ -363,27 +390,12 @@ if (generate_summary or save_order) and order_items:
                     })
             
             if db_order_items:
-                # Report savings for what is actually being saved - items
-                # missing an id were dropped above and must not inflate it
-                saved_savings = engine.calculate_order_savings([
-                    {
-                        'qty': entry['quantity'],
-                        'unit_price': entry['unit_price'],
-                        'avg_price': entry.get('avg_price') or entry['unit_price'],
-                        'max_price': entry.get('max_price') or entry['unit_price'],
-                    }
-                    for entry in db_order_items
-                ])
-                
                 order_id = db.create_order(
                     db_order_items,
                     notes=f"Order created on {datetime.now().strftime('%Y-%m-%d %H:%M')}",
                     status='completed'  # Saved orders count toward savings dashboards
                 )
-                st.success(f"✅ Order #{order_id} saved! Total savings: ${saved_savings['total_savings_vs_max']:.2f}")
                 dropped = len(order_items) - len(db_order_items)
-                if dropped:
-                    st.warning(f"⚠️ {dropped} item(s) skipped (missing vendor/item data).")
                 
                 # Reset the form: bump the widget-key namespace (form-
                 # buffered values replay otherwise), clear the dict, then
@@ -391,10 +403,15 @@ if (generate_summary or save_order) and order_items:
                 st.session_state.order_form_version += 1
                 st.session_state.order_quantities = {}
 
+                # Flash reports the STORED numbers (DB-resolved baselines),
+                # so the message can never disagree with the record.
+                stored = db.get_order(order_id['order_id'])
                 st.session_state['order_saved_flash'] = {
-                    'order_id': order_id,
-                    'savings': saved_savings['total_savings_vs_max'],
-                    'dropped': len(order_items) - len(db_order_items),
+                    'order_id': order_id['order_id'],
+                    'savings': stored['savings_vs_alt'],
+                    'covered': len(stored['items']) - stored['lines_without_alt'],
+                    'total_lines': len(stored['items']),
+                    'dropped': dropped,
                 }
                 st.rerun()
             else:

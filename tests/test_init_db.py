@@ -39,7 +39,7 @@ class TestSampleDataSpread:
         movers = 0
         checked = 0
         for item in db.get_all_items():
-            avg = db.get_average_price(item['name'])
+            avg = db.get_item_market_average(item['name'])
             if not avg:
                 continue
             for price_row in db.get_latest_prices(item['name']):

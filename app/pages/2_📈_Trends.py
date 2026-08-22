@@ -88,10 +88,12 @@ with tab1:
     
     with col2:
         st.metric(
-            "Total Saved",
-            f"${total_savings['total_savings_vs_max']:,.2f}",
+            "Net Saved",
+            f"${total_savings['total_savings_vs_alt']:,.2f}",
             delta=f"{total_savings['savings_percentage']:.1f}%",
-            help="Money saved by choosing optimal vendors"
+            help="Versus each line's cheapest alternative quote at order "
+                 "time (issue #17 basis). Legacy orders migrated where the "
+                 "two-vendor equivalence held."
         )
     
     with col3:
@@ -104,10 +106,14 @@ with tab1:
     with col4:
         avg_savings = total_savings['avg_savings_per_order']
         st.metric(
-            "Avg Savings/Order",
+            "Avg Net Savings/Order",
             f"${avg_savings:,.2f}",
-            help="Average savings per order"
+            help="Average net savings per completed order"
         )
+    
+    if total_savings.get('lines_without_alt'):
+        st.caption(f"ℹ️ {int(total_savings['lines_without_alt'])} order line(s) had no "
+                   "alternative quote and are excluded from savings totals.")
     
     st.divider()
     
@@ -134,7 +140,7 @@ with tab1:
         chart_data = pd.DataFrame({
             'Period': savings_df['period'],
             'Total Spent': savings_df['total_spent'].fillna(0),
-            'Savings': savings_df['total_savings_vs_max'].fillna(0)
+            'Net Saved': savings_df['total_savings_vs_alt'].fillna(0)
         })
         chart_data = chart_data.set_index('Period')
         
@@ -145,7 +151,7 @@ with tab1:
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            total_period_savings = savings_df['total_savings_vs_max'].sum()
+            total_period_savings = savings_df['total_savings_vs_alt'].sum()
             st.metric(f"Total Savings ({period_type})", f"${total_period_savings:,.2f}")
         
         with col2:
@@ -153,7 +159,7 @@ with tab1:
             st.metric("Total Orders", int(total_orders))
         
         with col3:
-            avg_per_period = savings_df['total_savings_vs_max'].mean()
+            avg_per_period = savings_df['total_savings_vs_alt'].mean()
             st.metric(f"Avg Savings per {period_type.rstrip('ly')}", f"${avg_per_period:,.2f}")
         
         # Savings trend table
@@ -274,30 +280,40 @@ with tab2:
         
         # Get latest prices
         latest_prices = db.get_latest_prices(selected_item)
-        # Honor the selected range - the caption below states it
-        avg_price = db.get_average_price(selected_item, days=time_range)
+        # Each vendor's delta is measured against its OWN trailing average
+        # (excluding today) - the market rate appears in the caption below.
+        baselines = {
+            p['vendor']: db.get_vendor_trend_baseline(
+                selected_item, p['vendor'], days=time_range)
+            for p in latest_prices
+        }
+        market_avg = db.get_item_market_average(selected_item, days=time_range)
         
         if latest_prices:
             for price in latest_prices:
                 vendor = price['vendor']
                 current = price['price']
-                
-                # Calculate vs average
-                if avg_price:
-                    diff_pct = ((current - avg_price) / avg_price) * 100
+
+                # Delta vs this vendor's OWN trailing average, today excluded:
+                # the arrow tracks one vendor's movement, not vendor-mix shifts
+                baseline = baselines.get(vendor)
+                if baseline:
+                    diff_pct = ((current - baseline) / baseline) * 100
                     diff_str = f"{diff_pct:+.1f}%"
                 else:
                     diff_str = "N/A"
-                
+
                 st.metric(
                     vendor,
                     f"${current:.2f}",
                     diff_str,
                     delta_color="inverse"  # Red for increase, green for decrease
                 )
-            
-            if avg_price:
-                st.caption(f"*Compared to {time_range}-day average: ${avg_price:.2f}*")
+
+            if market_avg:
+                st.caption(f"*Market rate: {time_range}-day cross-vendor average "
+                           f"${market_avg:.2f}; deltas vs each vendor's own "
+                           f"{time_range}-day history excluding today*")
         else:
             st.info("No current prices available")
     

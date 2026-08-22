@@ -28,14 +28,14 @@ def seeded_db(db):
     """
     item_id = db.add_item("Heavy Cream", category="Dairy", default_unit="Case")
     sysco = db.get_or_create_vendor("Sysco")
-    usfoods = db.get_or_create_vendor("US Foods")
+    usf = db.get_or_create_vendor("US Foods")
 
     conn_ctx = db.get_connection
     with conn_ctx() as conn:
         # Same date_recorded for all three; insert order defines recency.
         rows = [
             (item_id, sysco, 24.50),
-            (item_id, usfoods, 28.00),
+            (item_id, usf, 28.00),
             (item_id, sysco, 31.00),
         ]
         for item, vendor, price in rows:
@@ -46,3 +46,14 @@ def seeded_db(db):
                 (item, vendor, price),
             )
     return db
+
+
+@pytest.fixture()
+def three_vendors(db):
+    """Widget quoted today by three vendors: Sysco $20, US Foods $22, Gfs $25."""
+    item_id = db.add_item("Widget", "Dry Goods", "Each")
+    ids = {name: db.get_or_create_vendor(name)
+           for name in ("Sysco", "US Foods", "Gfs")}
+    for name, price in (("Sysco", 20.0), ("US Foods", 22.0), ("Gfs", 25.0)):
+        db.add_price("Widget", name, price, "Each")
+    return {"db": db, "item_id": item_id, "ids": ids}
