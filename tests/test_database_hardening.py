@@ -117,6 +117,69 @@ class TestSingleQueryItemPrices:
         assert len(cream['prices']) == 2          # one row per vendor
         assert by_vendor['Sysco'] == 31.0         # newest insert wins
 
+    def test_backfill_does_not_shadow_current_price_in_listing(self, db):
+        """Issue #9: the CTE in get_all_items_with_prices() ranked by
+        created_at only, so a re-imported OLD sheet won as 'latest' in the
+        Order Guide list while get_latest_prices() (date-first) disagreed.
+        The listing must honour date_recorded first too."""
+        from datetime import date, timedelta
+
+        item_id = db.add_item('Roma Tomatoes', 'Produce', 'Case')
+        sysco = db.get_or_create_vendor('Sysco')
+        usfoods = db.get_or_create_vendor('US Foods')
+
+        today = date.today().isoformat()
+        last_week = (date.today() - timedelta(days=7)).isoformat()
+
+        with db.get_connection() as conn:
+            rows = [
+                (sysco, 22.00, today),       # current price arrives first
+                (usfoods, 23.00, today),
+                (sysco, 18.00, last_week),   # week-old invoice backfilled LAST
+            ]
+            for vendor_id, price, recorded in rows:
+                conn.execute(
+                    """INSERT INTO price_history
+                       (item_id, vendor_id, price, unit, source, date_recorded)
+                       VALUES (?, ?, ?, 'Case', 'manual', ?)""",
+                    (item_id, vendor_id, price, recorded),
+                )
+
+        listing = db.get_all_items_with_prices()
+        tomatoes = next(i for i in listing if i['name'] == 'Roma Tomatoes')
+        best = min(tomatoes['prices'], key=lambda p: p['price'])
+
+        assert best['vendor'] == 'Sysco'
+        assert best['price'] == 22.00
+        assert best['date_recorded'] == today
+
+    def test_listing_agrees_with_detail_view(self, db):
+        """The Order Guide list and get_latest_prices must report the same
+        current price per vendor - they are two views of one fact."""
+        from datetime import date, timedelta
+
+        item_id = db.add_item('Heavy Cream', 'Dairy', 'Case')
+        sysco = db.get_or_create_vendor('Sysco')
+
+        today = date.today()
+        with db.get_connection() as conn:
+            for offset, price in [(0, 31.00), (-1, 24.50), (-7, 18.00), (-3, 29.00)]:
+                recorded = (today + timedelta(days=offset)).isoformat()
+                conn.execute(
+                    """INSERT INTO price_history
+                       (item_id, vendor_id, price, unit, source, date_recorded)
+                       VALUES (?, ?, ?, 'Case', 'manual', ?)""",
+                    (item_id, sysco, price, recorded),
+                )
+                # Insert order deliberately NOT chronological
+
+        detail = {p['price'] for p in db.get_latest_prices('Heavy Cream')}
+        listing_items = db.get_all_items_with_prices()
+        cream = next(i for i in listing_items if i['name'] == 'Heavy Cream')
+        listed = {p['price'] for p in cream['prices']}
+
+        assert detail == listed == {31.00}
+
     def test_query_count_is_constant(self, populated):
         """The whole point of F-32: O(1) queries, not O(items)."""
         import sqlite3

@@ -250,7 +250,7 @@ carry adversarial regression tests.
 
 | Finding | Status |
 |---------|--------|
-| F-01 | Fixed in #3; **re-opened by review** (insertion-order clock broke backfills) → date-first ranking + reversed/backfill tests, fixed in #3 (`f6ad58d`) |
+| F-01 | Fixed in #3; **re-opened by review** (insertion-order clock broke backfills) → date-first ranking + reversed/backfill tests, fixed in #3 (`f6ad58d`); **re-opened again as issue #9** — the fix reached `get_latest_prices()` only; the `latest` CTE in `get_all_items_with_prices()` was born later (#5's F-32 rewrite) and kept the old ordering, so the Order Guide list disagreed with the detail view → CTE fixed + listing-level regression tests in the issue-#9 PR |
 | F-02 | Fixed in #3 |
 | F-03 / F-13 | Fixed in #3 |
 | F-04 | Fixed in #4; **re-opened by review** (floor-half threshold was near no-op; grade tokens dropped) → matcher rewritten per repro matrix, fixed in #4 (`ec4f003`) |

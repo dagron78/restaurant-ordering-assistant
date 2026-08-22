@@ -474,7 +474,8 @@ class Database:
                            ph.date_recorded, ph.source,
                            ROW_NUMBER() OVER (
                                PARTITION BY ph.item_id, ph.vendor_id
-                               ORDER BY ph.created_at DESC, ph.id DESC
+                               ORDER BY ph.date_recorded DESC, ph.created_at DESC,
+                                        ph.id DESC
                            ) as rn
                     FROM price_history ph
                 ),
