@@ -414,8 +414,6 @@ with tab3:
     status_data = [
         {"Setting": "Gemini API Key", "Status": "✅ Configured" if validation['gemini_api'] else "❌ Missing"},
         {"Setting": "Email Credentials", "Status": "✅ Configured" if validation['email'] else "❌ Missing"},
-        {"Setting": "Sysco Credentials", "Status": "✅ Configured" if validation['sysco'] else "❌ Missing"},
-        {"Setting": "US Foods Credentials", "Status": "✅ Configured" if validation['usfoods'] else "❌ Missing"},
         {"Setting": "Database Directory", "Status": "✅ Exists" if validation['database_dir'] else "❌ Missing"},
     ]
     

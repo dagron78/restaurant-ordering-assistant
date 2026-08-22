@@ -30,7 +30,13 @@ st.markdown("*AI-powered recommendations based on prices and your preferences*")
 def get_engine():
     return RecommendationEngine()
 
-engine = get_engine()
+try:
+    engine = get_engine()
+except ValueError:
+    st.error("🔑 **Gemini API key is not configured.** The Order Guide needs "
+             "it to build recommendations.")
+    st.info("Copy `.env.example` to `.env`, set `GOOGLE_API_KEY`, then restart the app.")
+    st.stop()
 db = Database()
 
 # Refresh button
@@ -52,6 +58,14 @@ def get_recommendations():
     return engine.generate_order_guide()
 
 recommendations = get_recommendations()
+
+# Flash message from a completed save (post-rerun so the form shows cleared)
+if 'order_saved_flash' in st.session_state:
+    flash = st.session_state.pop('order_saved_flash')
+    st.success(f"✅ Order #{flash['order_id']} saved! "
+               f"Total savings: ${flash['savings']:.2f}")
+    if flash['dropped']:
+        st.warning(f"⚠️ {flash['dropped']} item(s) skipped (missing vendor/item data).")
 
 if not recommendations:
     st.warning("No items found. Add items in the Settings page or run database initialization.")
@@ -101,6 +115,12 @@ st.subheader("📝 Create Order")
 # Store order quantities in session state
 if 'order_quantities' not in st.session_state:
     st.session_state.order_quantities = {}
+# Widget-key namespace: bumped after each save so every number_input gets
+# a fresh identity. Form-buffered widget values otherwise replay old
+# quantities client-side no matter what is deleted server-side.
+if 'order_form_version' not in st.session_state:
+    st.session_state.order_form_version = 0
+FORM_V = st.session_state.order_form_version
 
 # Load custom CSS
 css_path = Path(__file__).parent.parent / 'assets' / 'style.css'
@@ -158,7 +178,7 @@ with st.form("order_form"):
                     "qty",
                     min_value=0,
                     value=st.session_state.order_quantities.get(item['item'], 0),
-                    key=f"qty_{item['item']}",
+                    key=f"qty_{FORM_V}_{item['item']}",
                     label_visibility="collapsed"
                 )
                 
@@ -217,7 +237,7 @@ with st.form("order_form"):
                             "Qty",
                             min_value=0,
                             value=st.session_state.order_quantities.get(item['item'], 0),
-                            key=f"qty_mobile_{item['item']}",
+                            key=f"qty_mobile_{FORM_V}_{item['item']}",
                             label_visibility="collapsed"
                         )
                     with c2:
@@ -365,11 +385,18 @@ if (generate_summary or save_order) and order_items:
                 if dropped:
                     st.warning(f"⚠️ {dropped} item(s) skipped (missing vendor/item data).")
                 
-                # Clear quantities after saving (both the dict and the
-                # number_input widget states keyed by item name)
-                for entry in order_items:
-                    st.session_state.pop(f"qty_{entry['item']}", None)
+                # Reset the form: bump the widget-key namespace (form-
+                # buffered values replay otherwise), clear the dict, then
+                # rerun so the cleared form is actually visible.
+                st.session_state.order_form_version += 1
                 st.session_state.order_quantities = {}
+
+                st.session_state['order_saved_flash'] = {
+                    'order_id': order_id,
+                    'savings': saved_savings['total_savings_vs_max'],
+                    'dropped': len(order_items) - len(db_order_items),
+                }
+                st.rerun()
             else:
                 st.warning("Could not save order - missing item or vendor IDs. Please refresh and try again.")
         except Exception as e:

@@ -13,9 +13,16 @@ A smart ordering application for restaurants that monitors vendor prices, tracks
 
 ## Screenshots
 
-| Order Guide | Trends | Settings |
-|-------------|--------|----------|
-| View recommendations | Analyze history | Configure system |
+| Auth Gate | Home | Order Guide |
+|-----------|------|-------------|
+| ![Auth gate](screenshots/walkthrough/00-auth-gate.png) | ![Home](screenshots/walkthrough/01-home.png) | ![Order Guide](screenshots/walkthrough/02-order-guide.png) |
+
+| Trends — Savings | Trends — Prices | Settings — Preferences |
+|------------------|-----------------|------------------------|
+| ![Savings](screenshots/walkthrough/03-trends-savings.png) | ![Prices](screenshots/walkthrough/03b-trends-prices.png) | ![Preferences](screenshots/walkthrough/04-settings-preferences.png) |
+
+Captured from a live instance during the Phase 1 runtime walkthrough
+(`docs/RUNTIME_WALKTHROUGH.md`).
 
 ## Quick Start
 
