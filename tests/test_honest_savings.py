@@ -12,10 +12,16 @@ savings (a dearer vendor chosen anyway) are preserved unclamped.
 import pytest
 
 from core.database import pick_cheapest_alternative
+from core.recommendation import RecommendationEngine
 
 
 class FakeAI:
     pass
+
+
+@pytest.fixture()
+def engine(db):
+    return RecommendationEngine(db=db, ai=FakeAI())
 
 
 def make_line(item_id, vendor_id, unit_price, qty=1, unit="Each"):

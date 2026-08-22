@@ -27,6 +27,35 @@ SCHEMA_VERSION = 1
 MIGRATIONS_DIR = Config.BASE_DIR / "scripts" / "migrations"
 
 
+def pick_cheapest_alternative(prices: List[Dict], chosen_vendor: str) -> Optional[Dict]:
+    """
+    The single definition of "the option you forwent": the cheapest latest
+    quote among vendors OTHER than the one picked. Never the max (F-22's
+    basis) and never an average - beating a bad quote is not a saving.
+
+    Ties on price break to the lowest vendor_id so the recorded
+    alt_vendor_id is reproducible across runs and SQLite versions.
+
+    Args:
+        prices: Rows shaped like get_latest_prices output
+            ({vendor, vendor_id, price, ...})
+        chosen_vendor: Name of the vendor whose line this baseline serves
+
+    Returns:
+        {'vendor_id', 'vendor', 'price'} of the cheapest alternative,
+        or None when no other vendor quotes the item.
+    """
+    candidates = [p for p in prices
+                  if p.get("vendor") != chosen_vendor
+                  and p.get("price") is not None]
+    if not candidates:
+        return None
+    best = min(candidates, key=lambda p: (p["price"], p.get("vendor_id") or 0))
+    return {"vendor_id": best.get("vendor_id"),
+            "vendor": best["vendor"],
+            "price": float(best["price"])}
+
+
 class Database:
     """SQLite database manager with connection pooling and helper methods."""
     
@@ -427,9 +456,9 @@ class Database:
             # same-day ties, because a backfilled old sheet gets a fresh
             # created_at and must not win.
             cursor = conn.execute(f"""
-                SELECT vendor, price, unit, date_recorded, source
+                SELECT vendor, vendor_id, price, unit, date_recorded, source
                 FROM (
-                    SELECT v.name as vendor, ph.price, ph.unit,
+                    SELECT v.name as vendor, v.id as vendor_id, ph.price, ph.unit,
                            ph.date_recorded, ph.source,
                            ROW_NUMBER() OVER (
                                PARTITION BY ph.vendor_id
@@ -446,30 +475,52 @@ class Database:
             
             return [dict(row) for row in cursor.fetchall()]
     
-    def get_average_price(self, item_name: str, days: int = None) -> Optional[float]:
+    def get_item_market_average(self, item_name: str, days: int = None) -> Optional[float]:
         """
-        Calculate rolling average price for an item.
-        
-        Args:
-            item_name: Name of the item
-            days: Number of days to include (default: Config.TREND_DAYS)
-            
-        Returns:
-            Average price or None if no data
+        Cross-vendor average for an item over the trailing window, including
+        today. A market rate: right for "how does this price compare to the
+        market", wrong for trend arrows (a vendor mix shift moves it).
         """
+        return self._average(item_name=item_name, days=days)
+
+    def get_vendor_trend_baseline(self, item_name: str, vendor_name: str,
+                                  days: int = None) -> Optional[float]:
+        """
+        Single-vendor average over the trailing window, excluding today.
+        The honest basis for a trend arrow on that vendor's current quote:
+        tracks one vendor's movement, immune to vendor-mix shifts, and not
+        damped by averaging today's price against itself.
+        """
+        if not vendor_name:
+            return None
+        return self._average(item_name=item_name, days=days,
+                             vendor_name=vendor_name, exclude_today=True)
+
+    def _average(self, item_name: str, days: int = None,
+                 vendor_name: str = None, exclude_today: bool = False) -> Optional[float]:
+        """Shared averaging machinery behind the two named entry points."""
         days = days or Config.TREND_DAYS
         cutoff_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
         
+        query = """
+            SELECT AVG(ph.price) as avg_price
+            FROM price_history ph
+            JOIN items i ON ph.item_id = i.id
+            WHERE i.name = ?
+            AND ph.date_recorded >= ?
+        """
+        params: List = [item_name, cutoff_date]
+        
+        if vendor_name:
+            query += " AND EXISTS (SELECT 1 FROM vendors v WHERE v.id = ph.vendor_id AND v.name = ?)"
+            params.append(vendor_name)
+        
+        if exclude_today:
+            query += " AND ph.date_recorded < ?"
+            params.append(datetime.now().strftime('%Y-%m-%d'))
+        
         with self.get_connection() as conn:
-            cursor = conn.execute("""
-                SELECT AVG(ph.price) as avg_price
-                FROM price_history ph
-                JOIN items i ON ph.item_id = i.id
-                WHERE i.name = ?
-                AND ph.date_recorded >= ?
-            """, (item_name, cutoff_date))
-            
-            row = cursor.fetchone()
+            row = conn.execute(query , params).fetchone()
             if row and row['avg_price'] is not None:
                 return float(row['avg_price'])
             return None
@@ -622,85 +673,169 @@ class Database:
     # ORDERS OPERATIONS
     # ==========================================
     
-    def create_order(self, items: List[Dict], notes: str = None,
-                     status: str = 'draft') -> int:
+    def _get_cheapest_alternative(self, conn, item_id: int,
+                                  exclude_vendor_id: int) -> Optional[Dict]:
+        """Resolve the baseline for one line using an existing connection.
+
+        Cheapest latest quote among all OTHER vendors; ties break to the
+        lowest vendor_id (mirrors pick_cheapest_alternative exactly).
+        Returns None when no other vendor quotes the item.
         """
-        Create a new order with items and savings tracking.
-        
+        cursor = conn.execute(f"""
+            SELECT v.id AS vendor_id, v.name AS vendor, ranked.price AS price
+            FROM (
+                SELECT ph.vendor_id, ph.price,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY ph.vendor_id
+                           ORDER BY {LATEST_PRICE_RANK_ORDER}
+                       ) as rn
+                FROM price_history ph
+                WHERE ph.item_id = ?
+            ) ranked
+            JOIN vendors v ON v.id = ranked.vendor_id
+            WHERE ranked.rn = 1 AND ranked.vendor_id != ?
+            ORDER BY ranked.price ASC, v.id ASC
+            LIMIT 1
+        """, (item_id, exclude_vendor_id))
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        return {"vendor_id": row["vendor_id"],
+                "vendor": row["vendor"],
+                "price": float(row["price"])}
+
+    def get_cheapest_alternative(self, item_name: str,
+                                 exclude_vendor) -> Optional[Dict]:
+        """
+        Public form of the baseline lookup: the cheapest latest quote among
+        vendors other than `exclude_vendor` (name or id). Thin wrapper over
+        the conn-taking private used inside create_order, so previews and
+        saves share one definition.
+
+        Returns:
+            {'vendor_id', 'vendor', 'price'} or None
+        """
+        if isinstance(exclude_vendor, int):
+            vendor = self.get_vendor(vendor_id=exclude_vendor)
+        else:
+            vendor = self.get_vendor(name=exclude_vendor)
+        item = self.get_item(name=item_name)
+        if not vendor or not item:
+            return None
+        with self.get_connection() as conn:
+            return self._get_cheapest_alternative(conn, item["id"], vendor["id"])
+
+    def create_order(self, items: List[Dict], notes: str = None,
+                     status: str = 'draft') -> Dict:
+        """
+        Create a new order with items and honest savings tracking.
+
+        Each line's baseline is resolved INTERNALLY at save time: the
+        cheapest latest quote among all OTHER vendors for that item, frozen
+        thereafter. Lines where no other vendor quotes are excluded from
+        savings and counted - never folded in at zero. Negative savings (a
+        dearer vendor chosen anyway) are preserved unclamped.
+
         Args:
-            items: List of order items with savings info:
-                - item_id, vendor_id, quantity, unit_price
-                - avg_price, max_price (for savings calculation)
+            items: Lines shaped {item_id, vendor_id, quantity, unit_price[, unit]}
+                (avg_price/max_price still accepted and stored as context)
             notes: Order notes
             status: Initial status ('draft', 'submitted', 'completed',
                 'cancelled'). Savings dashboards only read 'completed'.
-            
+
         Returns:
-            Order ID
+            {'order_id': int, 'lines_excluded': int, 'lines_total': int}
         """
         with self.get_connection() as conn:
-            # Calculate totals and savings
             total = 0
-            total_savings_vs_avg = 0
-            total_savings_vs_max = 0
+            sv_avg = 0
+            sv_max = 0
+            sv_alt = 0
+            excluded = 0
+            prepared = []
             
             for item in items:
                 qty = item.get('quantity', 0)
                 unit_price = item.get('unit_price', 0)
-                avg_price = item.get('avg_price', unit_price)
-                max_price = item.get('max_price', unit_price)
+                avg_price = item.get('avg_price')
+                max_price = item.get('max_price')
                 
-                item_total = qty * unit_price
-                total += item_total
+                total += qty * unit_price
                 
-                # Calculate savings vs average price
+                # Legacy context columns (labelled pre-v1 semantics upstream)
                 if avg_price and avg_price > unit_price:
-                    total_savings_vs_avg += qty * (avg_price - unit_price)
-                
-                # Calculate savings vs max vendor price
+                    sv_avg += qty * (avg_price - unit_price)
                 if max_price and max_price > unit_price:
-                    total_savings_vs_max += qty * (max_price - unit_price)
+                    sv_max += qty * (max_price - unit_price)
+                
+                # The headline baseline: cheapest alternative, frozen now.
+                alt = None
+                if item.get('item_id') and item.get('vendor_id'):
+                    alt = self._get_cheapest_alternative(
+                        conn, item['item_id'], item['vendor_id'])
+                
+                if alt is None:
+                    excluded += 1
+                    line_basis = 'no_alternative'
+                    line_vs_alt = 0
+                    alt_vendor_id = None
+                    alt_price = None
+                else:
+                    line_basis = 'vs_alt'
+                    line_vs_alt = qty * (alt['price'] - unit_price)
+                    sv_alt += line_vs_alt
+                    alt_vendor_id = alt['vendor_id']
+                    alt_price = alt['price']
+                
+                prepared.append((item, alt_vendor_id, alt_price,
+                                 line_vs_alt, line_basis))
+            
+            # Any real baseline makes the aggregate a vs-alt number; an order
+            # whose every line lacked one is honestly labelled otherwise.
+            order_basis = ('unknown_legacy' if prepared
+                           and all(p[4] != 'vs_alt' for p in prepared) else 'vs_alt')
             
             cursor = conn.execute(
                 """INSERT INTO orders
-                   (status, total_amount, total_savings, savings_vs_avg, savings_vs_max, notes)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (status, total, total_savings_vs_max,
-                 total_savings_vs_avg, total_savings_vs_max, notes)
+                   (status, total_amount, total_savings, savings_vs_avg,
+                    savings_vs_max, savings_vs_alt, lines_without_alt,
+                    savings_basis, notes)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (status, total, sv_max, sv_avg, sv_max,
+                 sv_alt, excluded, order_basis, notes)
             )
             order_id = cursor.lastrowid
             
-            # Add order items with savings details
-            for item in items:
+            for item, alt_vendor_id, alt_price, line_vs_alt, line_basis in prepared:
                 qty = item.get('quantity', 0)
                 unit_price = item.get('unit_price', 0)
-                avg_price = item.get('avg_price', unit_price)
-                max_price = item.get('max_price', unit_price)
-                
+                avg_price = item.get('avg_price')
+                max_price = item.get('max_price')
                 total_price = qty * unit_price
-                savings_vs_avg = qty * (avg_price - unit_price) if avg_price and avg_price > unit_price else 0
-                savings_vs_max = qty * (max_price - unit_price) if max_price and max_price > unit_price else 0
+                line_sv_avg = qty * (avg_price - unit_price) \
+                    if avg_price and avg_price > unit_price else 0
+                line_sv_max = qty * (max_price - unit_price) \
+                    if max_price and max_price > unit_price else 0
                 
                 conn.execute("""
                     INSERT INTO order_items
-                    (order_id, item_id, vendor_id, quantity, unit, unit_price, total_price,
-                     avg_price, max_price, savings_vs_avg, savings_vs_max)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (order_id, item_id, vendor_id, quantity, unit, unit_price,
+                     total_price, avg_price, max_price, savings_vs_avg,
+                     savings_vs_max, savings_vs_alt, alt_vendor_id, alt_price,
+                     savings_basis)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
-                    order_id,
-                    item['item_id'],
-                    item['vendor_id'],
-                    qty,
-                    item.get('unit', 'Each'),
-                    unit_price,
-                    total_price,
-                    avg_price,
-                    max_price,
-                    savings_vs_avg,
-                    savings_vs_max
+                    order_id, item['item_id'], item['vendor_id'], qty,
+                    item.get('unit', 'Each'), unit_price, total_price,
+                    avg_price, max_price, line_sv_avg, line_sv_max,
+                    line_vs_alt, alt_vendor_id, alt_price, line_basis,
                 ))
             
-            return order_id
+            return {
+                'order_id': order_id,
+                'lines_excluded': excluded,
+                'lines_total': len(items),
+            }
     
     def update_order_status(self, order_id: int, status: str) -> bool:
         """
@@ -752,21 +887,10 @@ class Database:
             
             return order_dict
     
-    def get_max_price_for_item(self, item_name: str) -> Optional[float]:
-        """
-        Get the maximum price from any vendor for an item (current prices).
-        
-        Args:
-            item_name: Name of the item
-            
-        Returns:
-            Maximum price or None if no data
-        """
-        prices = self.get_latest_prices(item_name)
-        if not prices:
-            return None
-        return max(p.get('price', 0) for p in prices)
-    
+    # get_max_price_for_item was retired with F-22's semantics: the max is
+    # no longer a savings basis anywhere, and the cheapest-alternative
+    # resolution lives in _get_cheapest_alternative.
+
     def get_orders_with_savings(self,
                                  start_date: str = None,
                                  end_date: str = None,

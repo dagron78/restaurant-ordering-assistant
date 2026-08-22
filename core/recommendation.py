@@ -432,7 +432,9 @@ class RecommendationEngine:
         total_cost = 0
         total_savings_vs_avg = 0
         total_savings_vs_max = 0
+        total_savings_vs_alt = 0
         items_with_savings = 0
+        lines_excluded = 0
         
         for item in order_items:
             qty = item.get('qty', 0)
@@ -451,6 +453,14 @@ class RecommendationEngine:
                 total_savings_vs_max += savings
                 if savings > 0:
                     items_with_savings += 1
+            
+            # Headline basis (#17): cheapest alternative vendor's quote.
+            # Lines without one are excluded and counted, never folded in.
+            alt_price = item.get('alt_price')
+            if alt_price is None:
+                lines_excluded += 1
+            else:
+                total_savings_vs_alt += qty * (alt_price - unit_price)
         
         # Calculate what you would have paid at max prices
         potential_max_cost = sum(
@@ -468,7 +478,11 @@ class RecommendationEngine:
             'total_savings_vs_max': total_savings_vs_max,
             'items_with_savings': items_with_savings,
             'potential_max_cost': potential_max_cost,
-            'savings_percentage': savings_pct
+            'savings_percentage': savings_pct,
+            # Honest headline (#17): vs the option you forwent; exclusions counted
+            'total_savings_vs_alt': total_savings_vs_alt,
+            'lines_excluded': lines_excluded,
+            'lines_total': len(order_items),
         }
     
     def compare_vendors(self, item_name: str) -> Dict:
@@ -482,7 +496,7 @@ class RecommendationEngine:
             Comparison dict with all vendor prices and analysis
         """
         prices = self.db.get_latest_prices(item_name)
-        avg_price = self.db.get_average_price(item_name)
+        avg_price = self.db.get_item_market_average(item_name)
         history = self.db.get_price_history(item_name)
         
         if not prices:

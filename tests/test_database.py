@@ -214,7 +214,7 @@ class TestOrderStatusAndSavings:
         vendor = db.get_or_create_vendor("Sysco")
         items = [dict(self.ORDER_ITEMS[0], item_id=item, vendor_id=vendor)]
 
-        order_id = db.create_order(items, status="draft")
+        order_id = db.create_order(items, status="draft")["order_id"]
         assert db.update_order_status(order_id, "completed") is True
         assert db.get_total_savings()["total_orders"] == 1
 
@@ -227,8 +227,8 @@ class TestOrderStatusAndSavings:
         vendor = db.get_or_create_vendor("Sysco")
         items = [dict(self.ORDER_ITEMS[0], item_id=item, vendor_id=vendor)]
 
-        order_id = db.create_order(items)
-        assert db.get_order(order_id)["status"] == "draft"
+        res = db.create_order(items)
+        assert db.get_order(res["order_id"])["status"] == "draft"
 
 
 class TestForeignKeyEnforcement:
