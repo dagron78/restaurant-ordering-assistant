@@ -148,6 +148,16 @@ clamp silently), and the excluded-line count reaching the UI.
 
 ## Phase 3 · Make the recommendation smart — F-17, F-18, F-26
 
+> **STATUS: DONE** — `phase/3-smart-recommendations`. Hash-gated parsing
+> (call-count asserted, reads never wipe), typed predicates in `core/rules.py`
+> (LLM out of the decision path; `GeminiEngine.generate_recommendation`
+> deleted per F-37/F-14), priority composition with stated tie-breaks,
+> all-excluded → offending rule named, per-rule thresholds replacing the 15%
+> constant, golden-fixture harness for the parser
+> (`scripts/capture_golden_preferences.py`; tests skip until captures exist —
+> stub/parser circularity), F-26 resolved Won't-fix-not-reproducible.
+> See issue #20 and tests/test_rules.py + tests/test_prefs_cache.py.
+
 This is the product's headline claim ("Combines price data with your preferences")
 and it is the largest remaining functional gap. Today `load_preferences()` calls
 Gemini on every Order Guide load and `DELETE`s the preferences table before

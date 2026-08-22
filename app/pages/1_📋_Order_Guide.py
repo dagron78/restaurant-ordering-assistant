@@ -439,4 +439,6 @@ with st.expander("🔍 View All Prices by Item"):
                 is_best = price['vendor'] == rec['recommended_vendor']
                 marker = "✓" if is_best else " "
                 st.write(f"  {marker} {price['vendor']}: ${price['price']:.2f}/{price['unit']}")
+            if rec.get('reasons'):
+                st.caption("Why: " + " → ".join(rec['reasons']))
             st.write("")
