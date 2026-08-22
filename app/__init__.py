@@ -1,5 +1,5 @@
 """
-Streamlit Application for Restaurant Ordering Assistant.
+Streamlit Application for Kitchen Order Guide.
 
 This package contains the web interface:
 - main.py: Application entry point and home page

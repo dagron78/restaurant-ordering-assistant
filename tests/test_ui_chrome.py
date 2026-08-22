@@ -17,9 +17,18 @@ class TestSingleProductName:
         for src in (gate, home):
             assert "Kitchen Order Guide" in src
             assert "Restaurant Ordering Assistant" not in src
-        # user-facing surfaces only (docstrings may keep historical names)
-        for f in [APP / "Home.py", APP / "components" / "auth_gate.py"]:
-            assert "Restaurant Ordering Assistant" not in f.read_text(), f
+
+    def test_name_singular_across_all_surfaces(self):
+        """Widened per review: app/** AND .streamlit/** must never carry
+        the old product name, and the surfaces a user actually sees
+        (login gate + home header) must carry the new one."""
+        surfaces = [p for p in APP.rglob("*.py") if "__pycache__" not in str(p)]
+        streamlit = pathlib.Path(__file__).parent.parent / ".streamlit"
+        surfaces += [p for p in streamlit.glob("*") if p.is_file()]
+
+        for f in surfaces:
+            assert "Restaurant Ordering Assistant" not in f.read_text(), \
+                f"old product name still in {f}"
 
 
 class TestRouterOwnsAuthAndTitles:

@@ -1,5 +1,5 @@
 """
-UI Helper Components for Restaurant Ordering Assistant.
+UI Helper Components for Kitchen Order Guide.
 
 Reusable Streamlit components and formatting utilities.
 """

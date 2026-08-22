@@ -140,8 +140,8 @@ Quality over price for all beef products.
 ```
 restaurant-ordering-assistant/
 ├── app/                    # Streamlit web interface
-│   ├── main.py            # Home page
-│   └── pages/             # Additional pages
+│   ├── Home.py            # Home page + router
+│   └── views/             # Additional pages
 ├── core/                   # Core business logic
 │   ├── ai_engine.py       # Gemini API wrapper
 │   ├── database.py        # SQLite operations

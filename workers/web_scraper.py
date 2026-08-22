@@ -48,11 +48,20 @@ class VendorScraper(ABC):
         self.session_file = Config.get_session_file(vendor_name)
         
         self.db = db or Database()
-        self.ai = ai or GeminiEngine()
-        
+        self._ai = ai
+
         # Scraping configuration
         self.headless = True
         self.timeout = 30000  # 30 seconds
+
+    @property
+    def ai(self):
+        """Lazy AI: constructing GeminiEngine needs an API key, but the
+        auth gate and session plumbing must work without one."""
+        if self._ai is None:
+            from core.ai_engine import GeminiEngine
+            self._ai = GeminiEngine()
+        return self._ai
 
     # ---- session authentication (issue #24) ------------------------------
     #
@@ -610,9 +619,9 @@ class SyscoScraper(VendorScraper):
     ]
     
     def __init__(self, **kwargs):
+        kwargs.setdefault('base_url', None)   # registry supplies from row
         super().__init__(
             vendor_name='Sysco',
-            base_url=Config.SYSCO_URL,
             **kwargs
         )
     
@@ -671,9 +680,9 @@ class USFoodsScraper(VendorScraper):
     ]
     
     def __init__(self, **kwargs):
+        kwargs.setdefault('base_url', None)
         super().__init__(
             vendor_name='US Foods',
-            base_url=Config.USFOODS_URL,
             **kwargs
         )
     
@@ -720,6 +729,31 @@ class USFoodsScraper(VendorScraper):
             return None
 
 
+SCRAPER_REGISTRY = {
+    "Sysco": SyscoScraper,
+    "US Foods": USFoodsScraper,
+}
+
+
+def get_scraper_for(vendor_row: Dict, db: Database = None,
+                    ai=None):
+    """
+    Vendor registry (#28): keyed by the vendors ROW's name.
+
+    A vendor with a registered scraper AND a scrape_url gets a portal
+    scraper pointed at the row's URL. Any other vendor is still valid -
+    email-only intake - and returns None here.
+    """
+    name = vendor_row.get("name")
+    cls = SCRAPER_REGISTRY.get(name)
+    if cls is None:
+        return None
+    base_url = vendor_row.get("scrape_url")
+    if not base_url:
+        return None
+    return cls(db=db, ai=ai, base_url=base_url)
+
+
 def run_weekly_scrape() -> Dict:
     """
     Entry point for scheduled weekly scraping.
@@ -738,9 +772,18 @@ def run_weekly_scrape() -> Dict:
         'total_errors': 0
     }
     
-    scrapers = [SyscoScraper(), USFoodsScraper()]
-    
-    for scraper in scrapers:
+    # Registry-driven (#28): every vendor row participates; rows without a
+    # scraper or scrape_url are email-only and reported as skipped.
+    vendors = Database().get_all_vendors()
+    for vendor_row in vendors:
+        scraper = get_scraper_for(vendor_row)
+        if scraper is None:
+            print(f"\n📦 {vendor_row['name']}: email-only intake (no portal "
+                  "scraper registered)")
+            combined_results['vendors'][vendor_row['name']] = {
+                'success': True, 'skipped': 'email-only'}
+            continue
+        print(f"\n📦 Scraping {vendor_row['name']}...")
         log.info(f"\n📦 Scraping {scraper.vendor_name}...")
         
         if not scraper.has_valid_session():
@@ -753,7 +796,7 @@ def run_weekly_scrape() -> Dict:
         
         results = scraper.scrape_all_items()
         
-        combined_results['vendors'][scraper.vendor_name] = results
+        combined_results['vendors'][vendor_row['name']] = results
         combined_results['total_items'] += results.get('items_scraped', 0)
         combined_results['total_errors'] += results.get('items_failed', 0)
         

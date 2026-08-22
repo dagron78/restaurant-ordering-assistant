@@ -10,7 +10,6 @@ import sqlite3
 import pytest
 
 from core.config import Config
-import core.ai_engine as ai_engine_module
 from core.ai_engine import GeminiEngine
 
 
@@ -35,12 +34,9 @@ def _png(tmp_path):
 
 @pytest.fixture()
 def monitor(monkeypatch):
-    monkeypatch.setattr(ai_engine_module.__name__ + '.GeminiEngine',
-                        _StubAI, raising=True)
-    # EmailMonitor constructs GeminiEngine; patch the name it resolves
+    # New monitor takes ai= injection; no module attr to patch.
     import workers.email_monitor as em
-    monkeypatch.setattr(em, 'GeminiEngine', _StubAI)
-    return em.EmailMonitor()
+    return em.EmailMonitor(ai=_StubAI())
 
 
 class TestParseDocumentRowResilience:

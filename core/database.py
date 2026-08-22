@@ -5,6 +5,7 @@ Provides a clean interface for all SQLite database operations
 including CRUD for items, prices, vendors, and orders.
 """
 
+import json
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -26,7 +27,7 @@ LATEST_PRICE_RANK_ORDER = "ph.date_recorded DESC, ph.created_at DESC, ph.id DESC
 # Highest schema version implemented by scripts/migrations/. Bump it together
 # with a new NNN_*.sql file there; PRAGMA user_version on real databases
 # records how far each one has come.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 MIGRATIONS_DIR = Config.BASE_DIR / "scripts" / "migrations"
 
 
@@ -223,7 +224,8 @@ class Database:
             row = cursor.fetchone()
             return dict(row) if row else None
     
-    def get_or_create_vendor(self, name: str) -> int:
+    def get_or_create_vendor(self, name: str, email_domain: str = None,
+                             scrape_url: str = None) -> int:
         """Get vendor ID, creating if necessary.
         
         Raises:
@@ -233,9 +235,11 @@ class Database:
             raise ValueError("Vendor name cannot be empty")
         
         with self.get_connection() as conn:
-            return self._get_or_create_vendor(conn, name)
+            return self._get_or_create_vendor(conn, name, email_domain, scrape_url)
     
-    def _get_or_create_vendor(self, conn: sqlite3.Connection, name: str) -> int:
+    def _get_or_create_vendor(self, conn: sqlite3.Connection, name: str,
+                              email_domain: str = None,
+                              scrape_url: str = None) -> int:
         """Get-or-create a vendor using an existing connection.
         
         Raises:
@@ -251,8 +255,8 @@ class Database:
             return row['id']
         
         cursor = conn.execute(
-            "INSERT INTO vendors (name) VALUES (?)", (name.strip(),)
-        )
+            "INSERT INTO vendors (name, email_domain, scrape_url) VALUES (?, ?, ?)",
+            (name.strip(), email_domain, scrape_url))
         return cursor.lastrowid
     
     def get_all_vendors(self) -> List[Dict]:
@@ -647,6 +651,73 @@ class Database:
                     " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                     (source_hash,))
         return count
+
+    def get_vendor_by_domain(self, sender_domain: str):
+        """Resolve an email sender's DOMAIN to a vendors row.
+        Matches exact or subdomain. Returns (True, row) / (False, None)."""
+        d = (sender_domain or "").strip().lower()
+        if "@" in d:
+            d = d.rsplit("@", 1)[1]
+        if not d:
+            return False, None
+        with self.get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM vendors "
+                "WHERE lower(email_domain) = ? "
+                "   OR ? LIKE '%.' || lower(email_domain) LIMIT 1",
+                (d, d)).fetchone()
+        return (True, dict(row)) if row else (False, None)
+
+    def add_quarantine(self, from_address: str, subject: str,
+                       attachment_names: List[str]) -> bool:
+        """Record an unknown-sender email as METADATA only.
+        Attacker-writable display data: truncated + stripped of path/markup.
+        Deduped on (from_address, subject); capped at 200 pending rows."""
+        def clean(value, limit):
+            text = str(value or "").replace("\\", "/")
+            text = text.rsplit("/", 1)[-1]
+            text = text.replace("..", ".").replace("<", "&lt;").replace(">", "&gt;")
+            return text[:limit]
+
+        with self.get_connection() as conn:
+            exists = conn.execute(
+                "SELECT 1 FROM quarantine WHERE from_address = ? AND subject = ?",
+                (clean(from_address, 254), clean(subject, 200))).fetchone()
+            if exists:
+                return False
+            cap = conn.execute(
+                "SELECT COUNT(*) AS n FROM quarantine").fetchone()["n"]
+            if cap >= 200:
+                return False
+            names = json.dumps(
+                [clean(n, 80) for n in (attachment_names or [])][:20])
+            conn.execute(
+                "INSERT INTO quarantine"
+                " (from_address, subject, attachment_names) VALUES (?, ?, ?)",
+                (clean(from_address, 254), clean(subject, 200), names))
+        return True
+
+    def list_quarantine(self, limit: int = 50) -> List[Dict]:
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM quarantine ORDER BY id DESC LIMIT ?",
+                (limit,)).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d["attachment_names"] = ", ".join(
+                    json.loads(d.get("attachment_names") or "[]"))
+            except ValueError:
+                d["attachment_names"] = ""
+            out.append(d)
+        return out
+
+    def resolve_quarantine(self, quarantine_id: int) -> bool:
+        with self.get_connection() as conn:
+            cur = conn.execute("DELETE FROM quarantine WHERE id = ?",
+                               (quarantine_id,))
+        return cur.rowcount > 0
 
     def get_pref_meta(self, key: str) -> Optional[str]:
         with self.get_connection() as conn:
