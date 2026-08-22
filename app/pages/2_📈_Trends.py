@@ -168,7 +168,7 @@ with tab1:
             display_df.columns = ['Period', 'Orders', 'Spent', 'Saved']
             display_df['Spent'] = display_df['Spent'].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
             display_df['Saved'] = display_df['Saved'].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
-            st.dataframe(display_df, use_container_width=True, hide_index=True)
+            st.dataframe(display_df, width='stretch', hide_index=True)
     else:
         st.info("No order history yet. Complete orders to start tracking savings!")
         st.markdown("""
@@ -215,7 +215,7 @@ with tab1:
                 available_cols = [c for c in display_cols if c in all_items_df.columns]
                 display_df = all_items_df[available_cols].copy()
                 display_df.columns = ['Item', 'Category', 'Qty', 'Spent', 'Saved'][:len(available_cols)]
-                st.dataframe(display_df, use_container_width=True, hide_index=True)
+                st.dataframe(display_df, width='stretch', hide_index=True)
     else:
         st.info("Complete orders to see item-level savings breakdown.")
 
@@ -389,7 +389,7 @@ with tab3:
                 'vs_avg': 'vs Average',
                 'Best': 'Recommended'
             }),
-            use_container_width=True,
+            width='stretch',
             hide_index=True
         )
         
@@ -410,7 +410,7 @@ with tab3:
             df = pd.DataFrame(history)
             st.dataframe(
                 df.sort_values('date_recorded', ascending=False),
-                use_container_width=True,
+                width='stretch',
                 hide_index=True
             )
             

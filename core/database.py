@@ -206,36 +206,6 @@ class Database:
                 )
             return [dict(row) for row in cursor.fetchall()]
     
-    def update_item(self, item_id: int, **kwargs) -> bool:
-        """Update item fields."""
-        allowed_fields = {'name', 'category', 'default_unit', 'is_active'}
-        updates = {k: v for k, v in kwargs.items() if k in allowed_fields}
-        
-        if not updates:
-            return False
-        
-        set_clause = ', '.join(f"{k} = ?" for k in updates.keys())
-        values = list(updates.values()) + [item_id]
-        
-        with self.get_connection() as conn:
-            conn.execute(
-                f"UPDATE items SET {set_clause} WHERE id = ?",
-                values
-            )
-            return True
-    
-    def get_categories(self) -> List[str]:
-        """Get list of unique categories."""
-        with self.get_connection() as conn:
-            cursor = conn.execute(
-                "SELECT DISTINCT category FROM items WHERE category IS NOT NULL ORDER BY category"
-            )
-            return [row['category'] for row in cursor.fetchall()]
-    
-    # ==========================================
-    # VENDORS OPERATIONS
-    # ==========================================
-    
     def get_vendor(self, vendor_id: int = None, name: str = None) -> Optional[Dict]:
         """Get vendor by ID or name."""
         with self.get_connection() as conn:
@@ -927,48 +897,6 @@ class Database:
     # no longer a savings basis anywhere, and the cheapest-alternative
     # resolution lives in _get_cheapest_alternative.
 
-    def get_orders_with_savings(self,
-                                 start_date: str = None,
-                                 end_date: str = None,
-                                 status: str = 'completed') -> List[Dict]:
-        """
-        Get orders with savings information for a date range.
-        
-        Args:
-            start_date: Start date (YYYY-MM-DD format)
-            end_date: End date (YYYY-MM-DD format)
-            status: Order status filter
-            
-        Returns:
-            List of orders with savings data
-        """
-        with self.get_connection() as conn:
-            query = """
-                SELECT id, order_date, status, total_amount,
-                       total_savings, savings_vs_avg, savings_vs_max,
-                       notes, created_at
-                FROM orders
-                WHERE 1=1
-            """
-            params = []
-            
-            if status:
-                query += " AND status = ?"
-                params.append(status)
-            
-            if start_date:
-                query += " AND date(order_date) >= ?"
-                params.append(start_date)
-            
-            if end_date:
-                query += " AND date(order_date) <= ?"
-                params.append(end_date)
-            
-            query += " ORDER BY order_date DESC"
-            
-            cursor = conn.execute(query, params)
-            return [dict(row) for row in cursor.fetchall()]
-    
     def get_savings_summary(self, period_type: str = 'weekly',
                            limit: int = 12) -> List[Dict]:
         """

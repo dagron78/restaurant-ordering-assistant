@@ -1,28 +1,29 @@
 # Restaurant Ordering Assistant Dependencies
+# Ceilings per F-33; authoritative pins live in requirements-lock.txt.
 
-# Web Framework
+# Web Framework (>=1.49: width= kw, AppTest)
 streamlit>=1.49,<2
 
 # AI Engine (google-generativeai is EOL upstream; new SDK)
 google-genai>=1.0,<2
 
 # Web Scraping
-playwright>=1.40.0
+playwright>=1.40,<2
 
 # Email
-imap-tools>=1.5.0
+imap-tools>=1.1
 
 # Data Processing
-pandas>=2.0.0
+pandas>=2.0,<3
 
 # Environment & Configuration
-python-dotenv>=1.0.0
+python-dotenv>=1.0,<2
 
 # Image Processing
-Pillow>=10.0.0
+Pillow>=10.0,<13
 
 # Background Task Scheduling
-APScheduler>=3.10.0
+APScheduler>=3.10,<4
 
-# PDF Generation (for order exports)
-reportlab>=4.0.0
+# PDF Generation (order exports - Phase 5)
+reportlab>=4.0,<6

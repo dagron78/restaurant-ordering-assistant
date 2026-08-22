@@ -10,7 +10,7 @@ Handles all AI-powered operations:
 
 import json
 import time
-from typing import Optional, List, Dict, Union
+from typing import List, Dict, Union
 from pathlib import Path
 
 from functools import partial
@@ -356,46 +356,11 @@ class GeminiEngine:
                 'notes': 'Failed to analyze HTML, using generic selectors'
             }
     
-    def extract_vendor_from_email(self, email_from: str, 
-                                   email_subject: str) -> Optional[str]:
-        """
-        Determine vendor name from email metadata.
-        
-        Args:
-            email_from: Email sender address
-            email_subject: Email subject line
-            
-        Returns:
-            Vendor name or None
-        """
-        # Check known domains first
-        email_lower = email_from.lower()
-        
-        if 'sysco' in email_lower:
-            return 'Sysco'
-        if 'usfoods' in email_lower:
-            return 'US Foods'
-        
-        # Use AI for unknown vendors
-        prompt = f"""
-        Determine the vendor/supplier name from this email metadata.
-        
-        From: {email_from}
-        Subject: {email_subject}
-        
-        Return ONLY the vendor name (e.g., "Sysco", "US Foods", "Restaurant Depot").
-        If unknown, return "Unknown".
-        """
-        
-        send = partial(self._send_to_model, self.flash_model, prompt)
-        response = self._call_with_retry(send)
-        return response.strip() if response else None
-    
     # Sanity bounds for a single price line - anything outside is treated
     # as an extraction error rather than reality.
     MIN_SANE_PRICE = 0.01
     MAX_SANE_PRICE = 100_000.0
-    
+
     def validate_extracted_prices(self, prices: List[Dict]) -> List[Dict]:
         """
         Deterministically validate extracted price lines.
