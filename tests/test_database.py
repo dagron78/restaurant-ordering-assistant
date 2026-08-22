@@ -94,6 +94,87 @@ class TestLatestPricesOneRowPerVendor:
         assert prices[0]["date_recorded"] == today
 
 
+class TestLatestPriceBothEntryPoints:
+    """Issue #9: the Order Guide list (get_all_items_with_prices) and the
+    detail view (get_latest_prices) are two views of one fact. Both
+    adversarial F-01 fixtures must pass through BOTH entry points, so a
+    third divergence is structurally impossible."""
+
+    ENTRY_POINTS = ('detail', 'listing')
+
+    def _latest_by_vendor(self, db, item_name, entry_point):
+        if entry_point == 'detail':
+            rows = db.get_latest_prices(item_name)
+            return {r['vendor']: (r['price'], r['date_recorded']) for r in rows}
+        items = db.get_all_items_with_prices()
+        row = next(i for i in items if i['name'] == item_name)
+        return {p['vendor']: (p['price'], p['date_recorded']) for p in row['prices']}
+
+    def _seed_backfill_scenario(self, db):
+        """Today's sheets arrive first; a week-old sheet is backfilled LAST."""
+        from datetime import date, timedelta
+
+        item_id = db.add_item('Roma Tomatoes', 'Produce', 'Case')
+        sysco = db.get_or_create_vendor('Sysco')
+        usfoods = db.get_or_create_vendor('US Foods')
+
+        today = date.today().isoformat()
+        last_week = (date.today() - timedelta(days=7)).isoformat()
+
+        with db.get_connection() as conn:
+            rows = [
+                (sysco, 22.00, today),
+                (usfoods, 23.00, today),
+                (sysco, 18.00, last_week),   # inserted last, dated oldest
+            ]
+            for vendor_id, price, recorded in rows:
+                conn.execute(
+                    """INSERT INTO price_history
+                       (item_id, vendor_id, price, unit, source, date_recorded)
+                       VALUES (?, ?, ?, 'Case', 'manual', ?)""",
+                    (item_id, vendor_id, price, recorded),
+                )
+        return {'Sysco': (22.00, today), 'US Foods': (23.00, today)}
+
+    def _seed_reversed_order_scenario(self, db):
+        """Newest first, then progressively older inserts."""
+        item_id = db.add_item('Heavy Cream', 'Dairy', 'Case')
+        sysco = db.get_or_create_vendor('Sysco')
+
+        with db.get_connection() as conn:
+            for offset, price in [(0, 20.00), (-180, 10.00), (-90, 15.00)]:
+                from datetime import date, timedelta
+                recorded = (date.today() + timedelta(days=offset)).isoformat()
+                conn.execute(
+                    """INSERT INTO price_history
+                       (item_id, vendor_id, price, unit, source, date_recorded)
+                       VALUES (?, ?, ?, 'Case', 'manual', ?)""",
+                    (item_id, sysco, price, recorded),
+                )
+        return {'Sysco': (20.00, date.today().isoformat())}
+
+    @pytest.mark.parametrize('entry_point', ENTRY_POINTS)
+    @pytest.mark.parametrize('scenario', ['backfill', 'reversed'])
+    def test_current_price_wins_everywhere(self, db, scenario, entry_point):
+        if scenario == 'backfill':
+            expected = self._seed_backfill_scenario(db)
+            item_name = 'Roma Tomatoes'
+        else:
+            expected = self._seed_reversed_order_scenario(db)
+            item_name = 'Heavy Cream'
+
+        assert self._latest_by_vendor(db, item_name, entry_point) == expected
+
+    def test_agreement_between_entry_points(self, db):
+        """The two views must return identical vendor→(price, date) maps."""
+        self._seed_backfill_scenario(db)
+
+        detail = self._latest_by_vendor(db, 'Roma Tomatoes', 'detail')
+        listing = self._latest_by_vendor(db, 'Roma Tomatoes', 'listing')
+
+        assert detail == listing
+
+
 class TestOrderStatusAndSavings:
     """F-02: savings dashboards can actually see orders."""
 
