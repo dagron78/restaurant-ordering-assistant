@@ -6,12 +6,10 @@ from vendor sales reps. Uses Gemini to parse documents and
 update the database with new prices.
 """
 
-import os
 import sys
-import tempfile
 from pathlib import Path
 from datetime import datetime
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -61,17 +59,23 @@ class EmailMonitor:
         Returns:
             Tuple of (is_vendor, vendor_name)
         """
-        from_lower = from_address.lower()
+        address = (from_address or '').lower()
+        if '@' not in address:
+            return False, None
         
-        for domain in self.vendor_domains:
-            if domain in from_lower:
+        # Compare the actual domain, not a substring: 'sysco.com' in
+        # 'anyone@sysco.com.attacker.tld' is true but the mail is not ours.
+        domain = address.rsplit('@', 1)[1].rstrip('>.')
+        
+        for vendor_domain in self.vendor_domains:
+            if domain == vendor_domain or domain.endswith('.' + vendor_domain):
                 # Determine vendor name
-                if 'sysco' in domain:
+                if 'sysco' in vendor_domain:
                     return True, 'Sysco'
-                elif 'usfoods' in domain:
+                elif 'usfoods' in vendor_domain:
                     return True, 'US Foods'
                 else:
-                    return True, domain.split('.')[0].title()
+                    return True, vendor_domain.split('.')[0].title()
         
         return False, None
     
@@ -221,6 +225,10 @@ class EmailMonitor:
                     if not is_vendor:
                         continue
                     
+                    # Track failures so the message is left unread and
+                    # retried on the next pass instead of being consumed.
+                    had_failure = False
+                    
                     # Process attachments
                     for att in msg.attachments:
                         if self._is_price_document(att.filename):
@@ -242,10 +250,13 @@ class EmailMonitor:
                             results['vendors'][vendor_name]['items'] += count
                             
                             if error:
+                                had_failure = True
                                 results['errors'].append(f"{att.filename}: {error}")
                     
-                    # Mark as read after processing
-                    mailbox.seen(msg, True)
+                    # Mark as read only when nothing failed; attachments that
+                    # errored (transient Gemini outage, bad parse) stay queued.
+                    if not had_failure:
+                        mailbox.seen(msg, True)
             
             return results
             
@@ -286,17 +297,17 @@ def run_email_check() -> dict:
     results = monitor.check_for_price_updates()
     
     if results['success']:
-        print(f"\n✓ Check complete!")
+        print("\n✓ Check complete!")
         print(f"  Documents processed: {results['processed']}")
         print(f"  Items added: {results['items_added']}")
         
         if results.get('vendors'):
-            print(f"\n  By vendor:")
+            print("\n  By vendor:")
             for vendor, stats in results['vendors'].items():
                 print(f"    - {vendor}: {stats['files']} files, {stats['items']} items")
         
         if results.get('errors'):
-            print(f"\n  ⚠️ Errors:")
+            print("\n  ⚠️ Errors:")
             for error in results['errors']:
                 print(f"    - {error}")
     else:

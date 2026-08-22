@@ -8,7 +8,6 @@ Handles all AI-powered operations:
 - HTML analysis for scraping
 """
 
-import os
 import json
 import time
 from typing import Optional, List, Dict, Any, Union
@@ -73,7 +72,8 @@ class GeminiEngine:
             except Exception as e:
                 last_error = e
                 if attempt < self.max_retries - 1:
-                    wait_time = self.retry_delay ** (attempt + 1)
+                    # Exponential backoff: 2s, 4s, 8s with default retry_delay=2
+                    wait_time = self.retry_delay * (2 ** attempt)
                     print(f"API call failed, retrying in {wait_time}s: {e}")
                     time.sleep(wait_time)
         
@@ -120,7 +120,6 @@ class GeminiEngine:
             raise FileNotFoundError(f"Document not found: {file_path}")
         
         vendor_context = f"The vendor is likely: {vendor_hint}" if vendor_hint else ""
-        
         prompt = f"""
         Analyze this restaurant invoice or price list document.
         Extract all items with their prices.
@@ -144,11 +143,16 @@ class GeminiEngine:
         [{{"item_name": "Heavy Cream", "price": 24.50, "unit": "Case", "vendor": "Sysco"}}]
         """
         
-        # Load image
-        img = PIL.Image.open(file_path)
+        # PDFs cannot be opened with PIL; send raw bytes with a MIME type.
+        # Gemini accepts inline parts for both images and PDFs.
+        if file_path.suffix.lower() == '.pdf':
+            document = [{'mime_type': 'application/pdf',
+                         'data': file_path.read_bytes()}]
+        else:
+            document = [PIL.Image.open(file_path)]
         
         # Use Pro model for better OCR accuracy
-        response = self._call_with_retry(self.model_pro, [prompt, img])
+        response = self._call_with_retry(self.model_pro, [prompt] + document)
         
         # Parse JSON
         clean_json = self._clean_json_response(response)

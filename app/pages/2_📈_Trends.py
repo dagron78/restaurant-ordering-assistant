@@ -12,7 +12,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
 
 from core.database import Database
 from core.recommendation import RecommendationEngine
@@ -267,7 +266,8 @@ with tab2:
         
         # Get latest prices
         latest_prices = db.get_latest_prices(selected_item)
-        avg_price = db.get_average_price(selected_item)
+        # Honor the selected range - the caption below states it
+        avg_price = db.get_average_price(selected_item, days=time_range)
         
         if latest_prices:
             for price in latest_prices:

@@ -16,10 +16,8 @@ services:
     ports:
       - "8501:8501"
     volumes:
-      # Persist database and session data
+      # Persist database and session data (includes preferences.txt)
       - ./data:/app/data
-      # Mount preferences file for easy editing
-      - ./data/preferences.txt:/app/data/preferences.txt
     environment:
       - STREAMLIT_SERVER_PORT=8501
       - STREAMLIT_SERVER_ADDRESS=0.0.0.0

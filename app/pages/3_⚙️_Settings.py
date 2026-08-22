@@ -5,19 +5,16 @@ Upload documents, manage preferences, and configure system settings.
 """
 
 import sys
-import os
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 import streamlit as st
 import pandas as pd
-from datetime import datetime
 
 from core.config import Config
 from core.database import Database
 from core.ai_engine import GeminiEngine
-from core.recommendation import RecommendationEngine
 
 st.set_page_config(page_title="Settings", page_icon="⚙️", layout="wide")
 
@@ -507,24 +504,45 @@ with tab4:
     with st.expander("⚠️ Danger Zone"):
         st.warning("These actions cannot be undone!")
         
-        if st.button("🗑️ Clear All Price History", type="secondary"):
-            confirm = st.checkbox("I understand this will delete all price data")
-            if confirm:
-                try:
-                    with db.get_connection() as conn:
-                        conn.execute("DELETE FROM price_history")
-                    st.success("Price history cleared")
-                except Exception as e:
-                    st.error(f"Error: {e}")
+        st.markdown("**Clear price history**")
+        # Confirmations must render before the button and gate it via
+        # `disabled` - a checkbox inside the button's if-block never works,
+        # because it reruns fresh (unchecked) or disappears entirely.
+        confirm_prices = st.checkbox(
+            "I understand this will delete all price data",
+            key="confirm_clear_prices"
+        )
+        if st.button("🗑️ Clear All Price History", type="secondary",
+                     disabled=not confirm_prices):
+            try:
+                with db.get_connection() as conn:
+                    conn.execute("DELETE FROM price_history")
+                st.success("Price history cleared")
+            except Exception as e:
+                st.error(f"Error: {e}")
         
-        if st.button("🗑️ Reset Entire Database", type="secondary"):
-            confirm = st.checkbox("I understand this will delete ALL data")
-            if confirm:
-                try:
-                    if Config.DATABASE_PATH.exists():
-                        Config.DATABASE_PATH.unlink()
-                    db.init_database()
-                    st.success("Database reset!")
-                    st.rerun()
-                except Exception as e:
+        st.divider()
+        
+        st.markdown("**Reset entire database**")
+        typed_confirm = st.text_input(
+            "Type RESET to enable this action", key="typed_reset_confirm"
+        )
+        confirm_reset = st.checkbox(
+            "I understand this will delete ALL data",
+            key="confirm_reset_db"
+        )
+        reset_armed = confirm_reset and typed_confirm.strip().upper() == 'RESET'
+        if st.button("🗑️ Reset Entire Database", type="secondary",
+                     disabled=not reset_armed):
+            try:
+                # Remove the database and its WAL sidecar files - deleting
+                # only the .db file lets stale -wal/-shm data resurface.
+                for suffix in ('', '-wal', '-shm'):
+                    sidecar = Path(str(Config.DATABASE_PATH) + suffix)
+                    if sidecar.exists():
+                        sidecar.unlink()
+                db.init_database()
+                st.success("Database reset!")
+                st.rerun()
+            except Exception as e:
                     st.error(f"Error: {e}")

@@ -1,0 +1,27 @@
+# Keep secrets and local state out of image layers (.gitignore does not
+# apply to docker builds - everything here would otherwise be COPY'd in).
+.git
+.github
+.env*
+!.env.example
+
+# Local data: the container mounts ./data as a volume instead
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Python artifacts
+__pycache__/
+*.pyc
+venv/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Not needed inside the image
+tests/
+docs/
+screenshots/

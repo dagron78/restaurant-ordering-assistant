@@ -8,7 +8,7 @@ including CRUD for items, prices, vendors, and orders.
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Dict, Optional, Any, Tuple
+from typing import List, Dict, Optional
 from contextlib import contextmanager
 
 from .config import Config
@@ -210,7 +210,8 @@ class Database:
     
     def add_price(self, item_name: str, vendor_name: str, price: float,
                   unit: str, source: str = 'manual', 
-                  confidence: float = 1.0, raw_text: str = None) -> int:
+                  confidence: float = 1.0, raw_text: str = None,
+                  date_recorded: str = None) -> int:
         """
         Record a price point in history.
         
@@ -222,6 +223,8 @@ class Database:
             source: 'email', 'scrape', or 'manual'
             confidence: Confidence score (0-1)
             raw_text: Original text from document
+            date_recorded: Optional date (YYYY-MM-DD) for backfilled
+                history; defaults to today
             
         Returns:
             ID of the inserted price record
@@ -239,9 +242,11 @@ class Database:
         with self.get_connection() as conn:
             cursor = conn.execute(
                 """INSERT INTO price_history 
-                   (item_id, vendor_id, price, unit, source, confidence, raw_text)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (item_id, vendor_id, price, unit, source, confidence, raw_text)
+                   (item_id, vendor_id, price, unit, source, confidence,
+                    raw_text, date_recorded)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_DATE))""",
+                (item_id, vendor_id, price, unit, source, confidence,
+                 raw_text, date_recorded)
             )
             return cursor.lastrowid
     
@@ -629,13 +634,10 @@ class Database:
         """
         with self.get_connection() as conn:
             if period_type == 'daily':
-                date_format = '%Y-%m-%d'
                 group_by = "date(order_date)"
             elif period_type == 'monthly':
-                date_format = '%Y-%m'
                 group_by = "strftime('%Y-%m', order_date)"
             else:  # weekly
-                date_format = '%Y-%W'
                 group_by = "strftime('%Y-%W', order_date)"
             
             cursor = conn.execute(f"""
