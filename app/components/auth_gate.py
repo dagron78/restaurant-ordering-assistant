@@ -1,62 +1,81 @@
 """
-Authentication gate for the Streamlit UI.
+Authentication gate (issue #30 A).
 
-Single shared-password model, sized for a homelab/restaurant deployment:
-set APP_PASSWORD in .env and every page requires it before rendering.
-Without APP_PASSWORD the app stays open but warns loudly on every page.
-
-Known, documented limitations (see README Security section): the shared
-password has unlimited attempts with no lockout or rate limiting, and
-vendor-email trust is domain-based only - no DKIM/SPF verification.
-
-Import note: lives under app/components because it needs streamlit;
-core/ must stay UI-free.
+Router model: Home.py checks is_authenticated() and only registers the
+protected pages in st.navigation once signed in - pre-auth, the sidebar has
+nothing to list. render_login() draws the sign-in screen and drops a
+sanitizer-safe marker div; app/assets/style.css scopes cosmetic hiding off
+that marker (body:has([data-preauth])) because Streamlit strips inline
+<style> tags from st.markdown.
 """
+
+import logging
 
 import streamlit as st
 
 from core.config import Config
 from core.security import password_matches
 
+log = logging.getLogger(__name__)
 
-def require_login() -> bool:
-    """
-    Gate a page behind APP_PASSWORD when one is configured.
 
-    Call at the top of app/main.py and every page in app/pages/.
-    Returns True once access is allowed (and renders the login form,
-    stopping execution, until the correct password is submitted).
-    """
-    # Read through Config, not os.getenv: load_dotenv() runs at core.config
-    # import time, and this module must not depend on some other import
-    # having pulled it in first - empty would be the fail-open branch.
+def is_authenticated() -> bool:
+    val = st.session_state.get("authenticated")
+    log.debug("is_authenticated=%s", val)
+    return bool(val)
+
+
+def _password_ok(candidate: str) -> bool:
     expected = Config.APP_PASSWORD
-    
-    if not expected:
+    return password_matches(candidate, expected)
+
+
+def render_login():
+    """Sign-in screen. Call instead of navigating to protected pages."""
+    # Cosmetic scoping: style.css hides sidebar/toolbar while this marker
+    # exists. A plain div with a data attribute survives Streamlit's HTML
+    # sanitization (<style> does not).
+    st.markdown('<div data-preauth hidden></div>', unsafe_allow_html=True)
+
+    if not Config.APP_PASSWORD:
         st.warning(
             "🔓 **No APP_PASSWORD is set.** Anyone who can reach this app "
             "can read your pricing data, vendor sessions and settings. "
             "Set `APP_PASSWORD` in `.env` to lock it down.",
             icon="⚠️"
         )
-        return True
-    
-    if st.session_state.get('authenticated'):
-        return True
-    
-    st.title("🔐 Restaurant Ordering Assistant")
+        return
+
+    st.title("🔐 Kitchen Order Guide")
     st.caption("Enter the app password to continue.")
-    
+
     with st.form("login_form", clear_on_submit=False):
         candidate = st.text_input("Password", type="password")
-        submitted = st.form_submit_button("Sign in", type="primary", width='stretch')
-        
+        submitted = st.form_submit_button(
+            "Sign in", type="primary", use_container_width=True)
+
         if submitted:
-            if password_matches(candidate, expected):
-                st.session_state['authenticated'] = True
+            if _password_ok(candidate):
+                st.session_state["authenticated"] = True
                 st.rerun()
             else:
                 st.error("Incorrect password.")
-    
+
     st.stop()
-    return False  # unreachable; st.stop() halts
+
+
+def gate_or_stop():
+    """Per-page guard: no-op when signed in; otherwise render the login
+    gate and stop. Deep-linked routes execute their page file without the
+    entry script, so every protected page keeps its own gate."""
+    if not is_authenticated():
+        render_login()
+
+
+def require_login() -> bool:
+    """
+    Legacy entry point retained for any page run outside the router.
+    Preferred flow: Home.py checks is_authenticated() and registers pages.
+    """
+    render_login()
+    return False  # unreachable; render_login stops execution

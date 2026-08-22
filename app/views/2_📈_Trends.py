@@ -10,15 +10,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from app.components.auth_gate import gate_or_stop
+
 import streamlit as st
 import pandas as pd
 
-from app.components.auth_gate import require_login
 from core.database import Database
 from core.recommendation import RecommendationEngine
-st.set_page_config(page_title="Price Trends & Savings", page_icon="📈", layout="wide")
 
-require_login()
+
+gate_or_stop()
 
 st.title("📈 Price Trends & Savings")
 st.markdown("*Analyze pricing history, track savings, and identify opportunities*")

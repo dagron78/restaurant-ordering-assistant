@@ -101,7 +101,7 @@ def init_database(reset: bool = False) -> None:
     
     if validation['all_valid']:
         print("\n🚀 Ready to run! Start the app with:")
-        print("   streamlit run app/main.py")
+        print("   streamlit run app/Home.py")
     else:
         print("\n⚠️  Please configure missing credentials in .env file")
         print("   See .env.example for required variables")
