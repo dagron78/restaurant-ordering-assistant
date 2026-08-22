@@ -227,12 +227,19 @@ with tab2:
              insert_pref("Never buy [Item] from [Vendor]")
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # Load current preferences
-    current_prefs = ""
+    # Load current preferences; seed a real rule on first run instead of
+    # the old wall of '#' comments (#30 B)
     if Config.PREFERENCES_PATH.exists():
-        with open(Config.PREFERENCES_PATH, 'r') as f:
-            current_prefs = f.read()
-    
+        current_prefs = Config.PREFERENCES_PATH.read_text()
+    else:
+        current_prefs = (
+            "Prefer Sysco for all produce items unless US Foods is 15% cheaper.\n"
+            "Never buy frozen fish from Gfs.\n"
+            "Alert me if Avocados exceed $55 per case."
+        )
+        Config.PREFERENCES_PATH.parent.mkdir(parents=True, exist_ok=True)
+        Config.PREFERENCES_PATH.write_text(current_prefs)
+
     # Initialize session state for text area if not present (or sync with file)
     if 'prefs_input' not in st.session_state:
         st.session_state['prefs_input'] = current_prefs
@@ -244,6 +251,45 @@ with tab2:
         help="Write your rules in plain English",
         key="prefs_input"
     )
+
+    # Plain-English readback of parsed rules (#30 B): always visible, not
+    # hidden behind a collapsed expander of raw field names.
+    if prefs_text.strip():
+        try:
+            ai = GeminiEngine()
+            rules = ai.parse_preferences(prefs_text)
+            if rules:
+                st.markdown("**📖 How the AI reads your rules:**")
+                for r in rules:
+                    rt = r.get('rule_type', '?')
+                    ip = r.get('item_pattern', '*')
+                    cond = r.get('condition', {})
+                    action = r.get('action', '')
+                    icon = {'vendor_preference': '🏭',
+                            'price_threshold': '💲',
+                            'quality_rule': '💎',
+                            'exclusion': '🚫'}.get(rt, 'ℹ️')
+                    readable = f"{icon} **{ip}**"
+                    if isinstance(cond, dict) and cond.get('prefer_vendor'):
+                        readable += f" → prefer {cond['prefer_vendor']}"
+                        pct = cond.get('switch_if_cheaper_pct')
+                        if pct is not None and pct > 0:
+                            readable += f" (unless {pct:g}% cheaper)"
+                    elif isinstance(cond, dict) and cond.get('vendor'):
+                        readable += f" → never buy from {cond['vendor']}"
+                    elif isinstance(cond, dict) and cond.get('threshold'):
+                        cmp_map = {'>': 'above', '<': 'below',
+                                   '>=': 'at or above', '<=': 'at or below'}
+                        op = cmp_map.get(cond.get('comparator', '>'),
+                                         cond.get('comparator', ''))
+                        readable += f" → alert {op} ${cond['threshold']:,.2f}"
+                    if action:
+                        readable += f" — {action}"
+                    st.caption(readable)
+            else:
+                st.caption("AI could not parse any rules from this text.")
+        except Exception:
+            pass  # Gemini not configured — don't block editing
     
     col1, col2 = st.columns([1, 3])
     

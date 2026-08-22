@@ -32,13 +32,6 @@ class Config:
     EMAIL_IMAP_SERVER: str = os.getenv('EMAIL_IMAP_SERVER', 'imap.gmail.com')
     EMAIL_CHECK_INTERVAL: int = int(os.getenv('EMAIL_CHECK_INTERVAL', '8'))
     
-    # Vendor site URLs.
-    # NOTE: vendor login is handled by manual browser session refresh
-    # (`python workers/web_scraper.py --refresh <vendor>`) - no vendor
-    # usernames/passwords are stored or needed anywhere.
-    SYSCO_URL: str = os.getenv('SYSCO_URL', 'https://shop.sysco.com')
-    USFOODS_URL: str = os.getenv('USFOODS_URL', 'https://www.usfoods.com')
-    
     # File paths
     DATABASE_PATH: Path = BASE_DIR / os.getenv('DATABASE_PATH', 'data/restaurant_data.db')
     PREFERENCES_PATH: Path = BASE_DIR / os.getenv('PREFERENCES_PATH', 'data/preferences.txt')
@@ -55,9 +48,6 @@ class Config:
     
     # Optional app password. When set, every UI page requires it.
     APP_PASSWORD: str = os.getenv('APP_PASSWORD', '')
-    
-    # Vendor email domains to watch
-    VENDOR_EMAIL_DOMAINS: list = ['sysco.com', 'usfoods.com']
     
     # Price list keywords for email filtering
     PRICE_LIST_KEYWORDS: list = ['price', 'catalog', 'list', 'quote', 'invoice', 'pricing']
