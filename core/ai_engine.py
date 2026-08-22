@@ -194,15 +194,26 @@ class GeminiEngine:
         
         return validated_items
     
-    def parse_preferences(self, preferences_text: str) -> List[Dict]:
+    def parse_preferences(self, preferences_text: str,
+                          capture_raw=None) -> List[Dict]:
         """
         Convert natural language preferences to structured rules.
-        
+
+        The model's ONLY job: prose -> typed predicate. Downstream
+        decisions are made by core.rules in plain Python (issue #20).
+
         Args:
             preferences_text: Free-form text with ordering preferences
-            
+            capture_raw: Optional callback receiving the raw response text
+                before cleaning - used by the golden-fixture capture script
+
         Returns:
-            List of structured preference rules
+            List of structured rule dicts; 'condition' is an OBJECT whose
+            shape depends on rule_type:
+                vendor_preference -> {"prefer_vendor", "switch_if_cheaper_pct"}
+                exclusion         -> {"vendor"}
+                price_threshold   -> {"comparator", "threshold"}
+                quality_rule/alert-> {} (advisory)
         """
         if not preferences_text or not preferences_text.strip():
             return []
@@ -215,107 +226,78 @@ class GeminiEngine:
         {preferences_text}
         ---
         
-        Convert each preference/rule into a structured JSON format.
-        
         Return a JSON array where each rule has:
-        - "rule_type": One of "vendor_preference", "price_threshold", "quality_rule", "alert", "exclusion"
-        - "item_pattern": Item name, category, or "*" for all items
-        - "condition": Description of when the rule applies
-        - "action": What to do when condition is met
+        - "rule_type": one of "vendor_preference", "price_threshold",
+          "quality_rule", "alert", "exclusion"
+        - "item_pattern": item name or category substring the rule applies
+          to, or "*" for all items
+        - "condition": an OBJECT whose shape depends on rule_type:
+            vendor_preference -> {{"prefer_vendor": "<vendor name>",
+                                   "switch_if_cheaper_pct": <number>}}
+                (switch_if_cheaper_pct = how much cheaper another vendor must
+                 be before we skip the preferred one; omit the key if the
+                 preference states no tolerance)
+            exclusion         -> {{"vendor": "<vendor name>"}}
+            price_threshold   -> {{"comparator": ">" | ">=" | "<" | "<=",
+                                   "threshold": <number>}}
+            quality_rule, alert -> {{}} (empty object)
+        - "action": short human-readable summary of the rule
         
-        Rule type guidelines:
-        - "vendor_preference": Prefer or require specific vendor
-        - "price_threshold": Price-based alerts or limits
-        - "quality_rule": Quality over price preferences
-        - "alert": Notification triggers
-        - "exclusion": Never buy from specific vendor
-        
-        Example output:
+        Examples:
         [
-            {{"rule_type": "vendor_preference", "item_pattern": "Tomatoes", "condition": "always", "action": "Prefer Sysco"}},
-            {{"rule_type": "price_threshold", "item_pattern": "Avocados", "condition": "price > 50", "action": "Alert before ordering"}},
-            {{"rule_type": "exclusion", "item_pattern": "Frozen Fish", "condition": "always", "action": "Never buy from Vendor A"}}
+          {{"rule_type": "vendor_preference", "item_pattern": "Tomatoes",
+            "condition": {{"prefer_vendor": "Sysco", "switch_if_cheaper_pct": 10}},
+            "action": "Prefer Sysco unless 10%+ cheaper elsewhere"}},
+          {{"rule_type": "exclusion", "item_pattern": "Frozen Fish",
+            "condition": {{"vendor": "Gfs"}},
+            "action": "Never buy frozen fish from Gfs"}},
+          {{"rule_type": "price_threshold", "item_pattern": "Avocados",
+            "condition": {{"comparator": ">", "threshold": 50}},
+            "action": "Alert above $50"}}
         ]
         
-        Return ONLY valid JSON array, no additional text.
+        Rules of thumb:
+        - If a tolerance/percentage is stated, put it in
+          switch_if_cheaper_pct. If not stated, omit the key entirely.
+        - Vendor names must match the prose spelling.
+        - Return ONLY valid JSON array, no additional text.
         """
         
         response = self._call_with_retry(self.model_flash, prompt)
+        if capture_raw is not None:
+            try:
+                capture_raw(response)
+            except Exception as e:
+                print(f"capture_raw callback failed (ignored): {e}")
         clean_json = self._clean_json_response(response)
         
         try:
             rules = json.loads(clean_json)
-            return rules if isinstance(rules, list) else []
         except json.JSONDecodeError:
             print(f"Failed to parse preferences: {clean_json[:200]}")
             return []
-    
-    def generate_recommendation(self, item_data: Dict, 
-                               preferences: List[Dict]) -> Dict:
-        """
-        Generate ordering recommendation for an item based on prices and preferences.
         
-        Args:
-            item_data: Dict with 'name', 'prices' (list), 'avg_price'
-            preferences: List of applicable preference rules
-            
-        Returns:
-            Recommendation dict with vendor, reason, trend, and alerts
-        """
-        prompt = f"""
-        Given this price data and preferences, recommend the best vendor to order from.
+        if not isinstance(rules, list):
+            return []
         
-        Item: {item_data['name']}
-        
-        Current Prices:
-        {json.dumps(item_data.get('prices', []), indent=2)}
-        
-        30-Day Average Price: ${item_data.get('avg_price', 'N/A')}
-        
-        Applicable Preferences/Rules:
-        {json.dumps(preferences, indent=2) if preferences else 'None specified'}
-        
-        Analyze and return a JSON object with:
-        - "recommended_vendor": Name of the vendor to order from
-        - "reason": Brief explanation (1-2 sentences)
-        - "trend": "stable", "rising", or "falling" based on current vs average
-        - "alert": Optional alert message if price is unusual or a preference triggers
-        
-        Consider:
-        1. Price (lower is generally better)
-        2. User preferences (may override lowest price)
-        3. Price trends (significant changes worth noting)
-        
-        Return ONLY valid JSON, no additional text.
-        """
-        
-        response = self._call_with_retry(self.model_flash, prompt)
-        clean_json = self._clean_json_response(response)
-        
-        try:
-            recommendation = json.loads(clean_json)
-            return {
-                'recommended_vendor': recommendation.get('recommended_vendor', 'Unknown'),
-                'reason': recommendation.get('reason', 'Lowest price'),
-                'trend': recommendation.get('trend', 'stable'),
-                'alert': recommendation.get('alert')
-            }
-        except json.JSONDecodeError:
-            # Fallback to simple logic
-            if item_data.get('prices'):
-                best = min(item_data['prices'], key=lambda x: x.get('price', float('inf')))
-                return {
-                    'recommended_vendor': best.get('vendor', 'Unknown'),
-                    'reason': 'Lowest price (AI parsing failed)',
-                    'trend': 'unknown',
-                    'alert': None
-                }
-            return {
-                'recommended_vendor': 'Unknown',
-                'reason': 'No price data available',
-                'trend': 'unknown',
-                'alert': 'No prices found'
-            }
+        # Normalize: unknown types degrade to advisory 'alert'; conditions
+        # coerced to objects where possible so core.rules stays typed.
+        valid_types = {"vendor_preference", "price_threshold",
+                       "quality_rule", "alert", "exclusion"}
+        normalized = []
+        for r in rules:
+            if not isinstance(r, dict):
+                continue
+            rtype = r.get('rule_type')
+            normalized.append({
+                'rule_type': rtype if rtype in valid_types else 'alert',
+                'item_pattern': str(r.get('item_pattern', '*') or '*'),
+                'condition': r.get('condition')
+                    if isinstance(r.get('condition'), dict) else {},
+                'action': str(r.get('action', '') or ''),
+                'priority': r.get('priority'),
+            })
+        return normalized
     
     def analyze_html_for_selectors(self, html_content: str, 
                                     item_name: str) -> Dict:

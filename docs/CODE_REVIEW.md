@@ -278,11 +278,11 @@ establishes intent, not outcome.
 | F-14 | Fixed in #5 (deterministic validation; per-row extraction coercion added post-review) |
 | F-15 | Fixed in #5 (HTML scrubbed + capped pre-AI) |
 | F-16 | Partially: 12→145 tests incl. UI-free coverage of core/workers; Streamlit UI tests still open |
-| F-17 / F-18 | Open (preference-engine rework) |
+| F-17 / F-18 | Fixed in Phase 3 (issue #20). `load_preferences` parses only when sha256(preferences.txt) differs from `prefs_meta.source_hash` — reads never re-parse and never wipe (call-COUNT asserted). Rules are typed predicates (`condition_json`) evaluated by `core/rules.py`: priority order, exclusions-before-preferences at equal priority, earlier-id tie-break, per-rule thresholds replacing the 15% constant, all-excluded → offending rule named. Behavioural citations: tests/test_rules.py (rule matrix), tests/test_prefs_cache.py (call counts) |
 | F-19 / F-21 / F-22 | Fixed in Phase 2 (issue #17). Decision: savings = versus the **cheapest alternative** vendor's latest quote at order time — min over others, never max/average; N-vendor correct from day one (a two-vendor reading of max≡min would have been the signature correct-under-an-unstated-assumption bug). Baselines frozen at write time on order_items; legacy rows stamped `vs_alt`/`unknown_legacy` during migration 001 (two-vendor equivalence recorded once). Behavioural citations: tests/test_honest_savings.py (three-vendor, dearest-chosen-negative, zero-others exclusion+count, tie-break, frozen baseline, preview/save parity), tests/test_migration.py (legacy stamping + structural identity) |
 | F-20 / F-29 / F-31 | Fixed in #4 |
 | F-23 | Fixed in #3 |
-| F-25 / F-26 / F-27 | F-25/F-27 fixed in #5; **F-26 open** (preferences text-area session state) |
+| F-25 / F-26 / F-27 | F-25/F-27 fixed in #5; **F-26 Won't-fix-not-reproducible**: chips append monotonically across repeated clicks on Streamlit 1.50 — verified twice (Phase 1 walkthrough; Phase 3 re-check: line counts 26→28→29→30 over three clicks). Left alone per issue #20: fixing an unreproducible bug is how a working page acquires a real one |
 | F-28 | Fixed in #5 |
 | F-30 | Fixed in #5; ingestion no longer auto-creates items (post-review hardening) |
 | F-32 | Fixed in #5 (single windowed query; query-count test) |
@@ -293,8 +293,8 @@ establishes intent, not outcome.
 | F-40 | Fixed in #5 (non-root container, SCRAPE_DAY guard, scrape delay, safe upload names) |
 | Post-review A/B/C/D/E | All fixed as noted above |
 
-Still genuinely open: **F-16 (UI tests), F-17/F-18 (preference engine),
-F-26, F-33, F-34/F-35, F-37
+Still genuinely open: **F-16 (UI tests),
+F-33, F-34/F-35, F-37
 (remainder), F-38**, and the `google-generativeai` → `google-genai` SDK
 migration (deprecation warning fires on every test run).
 

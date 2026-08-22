@@ -5,12 +5,13 @@ Combines price data, trend analysis, and user preferences
 to generate intelligent ordering recommendations.
 """
 
-from typing import List, Dict
+from typing import List, Dict, Optional
 from pathlib import Path
 
 from .config import Config
 from .database import Database
 from .ai_engine import GeminiEngine
+from .rules import apply_rules
 
 
 class RecommendationEngine:
@@ -34,40 +35,70 @@ class RecommendationEngine:
         self.preferences: List[Dict] = []
         self._preferences_loaded = False
     
-    def load_preferences(self, preferences_file: Path = None) -> List[Dict]:
+    def load_preferences(self, preferences_file: Path = None,
+                         force: bool = False) -> List[Dict]:
         """
-        Load and parse preferences from file.
-        
+        Load typed preference rules.
+
+        Gemini is invoked ONLY when the file's content hash differs from
+        the last parse (or force=True). Otherwise stored rows are read and
+        normalized - a read path never wipes the table (F-17).
+
         Args:
             preferences_file: Path to preferences text file
-            
+            force: Re-parse even when the hash is unchanged
+
         Returns:
-            List of parsed preference rules
+            List of normalized rule dicts for the evaluator
         """
-        preferences_file = preferences_file or Config.PREFERENCES_PATH
-        
+        import hashlib
+
+        path = Path(preferences_file) if preferences_file \
+            else Config.PREFERENCES_PATH
         try:
-            if preferences_file.exists():
-                with open(preferences_file, 'r') as f:
-                    text = f.read()
-                
-                if text.strip():
-                    self.preferences = self.ai.parse_preferences(text)
-                    
-                    # Also save to database for persistence
-                    self.db.save_preferences(self.preferences)
-            else:
-                # Try loading from database
-                self.preferences = self.db.get_preferences()
-            
+            text = path.read_text() if Path(path).exists() else ''
+            file_hash = (hashlib.sha256(text.encode('utf-8')).hexdigest()
+                         if text.strip() else None)
+
+            cached_hash = self.db.get_pref_meta('source_hash')
+            if not force and file_hash and cached_hash == file_hash:
+                # Pure read: no LLM call, no DELETE, rows untouched.
+                self.preferences = self._normalize_rule_rows(
+                    self.db.get_preferences())
+                self._preferences_loaded = True
+                return self.preferences
+
+            if text.strip():
+                self.preferences = self.ai.parse_preferences(text)
+                self.db.save_preferences(self.preferences,
+                                         source_hash=file_hash)
+
+            self.preferences = self._normalize_rule_rows(
+                self.db.get_preferences())
             self._preferences_loaded = True
             return self.preferences
-            
+
         except Exception as e:
             print(f"Error loading preferences: {e}")
             self.preferences = []
             self._preferences_loaded = True
             return []
+
+    def _normalize_rule_rows(self, rows: List[Dict]) -> List[Dict]:
+        """Shape DB rows for core.rules.apply_rules."""
+        normalized = []
+        for r in rows:
+            if not r.get('is_active', 1):
+                continue
+            normalized.append({
+                'id': r.get('id'),
+                'rule_type': r.get('rule_type'),
+                'item_pattern': r.get('item_pattern', '*'),
+                'priority': r.get('priority') or 0,
+                'action': r.get('action_text') or '',
+                'condition_json': r.get('condition_json'),
+            })
+        return normalized
     
     def get_applicable_preferences(self, item_name: str, 
                                    category: str = None) -> List[Dict]:
@@ -166,63 +197,36 @@ class RecommendationEngine:
                 'alert': None
             }
     
-    def get_best_vendor(self, prices: List[Dict], 
-                       preferences: List[Dict] = None) -> Dict:
+    def get_best_vendor(self, prices: List[Dict],
+                        preferences: List[Dict] = None,
+                        item_name: str = None,
+                        category: str = None) -> Optional[Dict]:
         """
-        Determine the best vendor based on price and preferences.
-        
+        Determine the winning vendor by composing typed rules via
+        core.rules.apply_rules (priority order, deterministic ties, no LLM).
+
         Args:
-            prices: List of price records with vendor info
-            preferences: Applicable preference rules
-            
+            prices: Candidate price rows (get_latest_prices shape)
+            preferences: Normalized rule rows
+            item_name / category: Pattern-matching context
+
         Returns:
-            Best price record with recommendation reason
+            Winning price row with a 'reason' audit string, or None when
+            the rules exclude every candidate.
         """
         if not prices:
             return None
-        
-        # Start with lowest price
-        best = min(prices, key=lambda x: x.get('price', float('inf')))
-        reason = 'Lowest price'
-        
-        # Check preferences for overrides
-        if preferences:
-            for pref in preferences:
-                rule_type = pref.get('rule_type', '')
-                action = pref.get('action', '').lower()
-                
-                # Vendor preference
-                if rule_type == 'vendor_preference':
-                    for price in prices:
-                        vendor = price.get('vendor', '').lower()
-                        if vendor in action or action in vendor:
-                            # Check if price difference is acceptable
-                            price_diff = price['price'] - best['price']
-                            price_diff_pct = (price_diff / best['price']) * 100 if best['price'] > 0 else 0
-                            
-                            # Accept up to 15% higher for preferred vendor
-                            if price_diff_pct <= 15:
-                                best = price
-                                reason = f"Preferred vendor ({pref.get('condition', 'user preference')})"
-                            break
-                
-                # Exclusion rule
-                elif rule_type == 'exclusion':
-                    excluded_vendors = []
-                    for price in prices:
-                        vendor = price.get('vendor', '').lower()
-                        if vendor in action or action in vendor:
-                            excluded_vendors.append(vendor)
-                    
-                    # Filter out excluded vendors
-                    filtered = [p for p in prices 
-                               if p.get('vendor', '').lower() not in excluded_vendors]
-                    
-                    if filtered:
-                        best = min(filtered, key=lambda x: x.get('price', float('inf')))
-                        reason = f'Lowest price (excluding {", ".join(excluded_vendors)})'
-        
-        best['reason'] = reason
+
+        outcome = apply_rules(prices, preferences or [],
+                              item_name=item_name, category=category)
+        self.last_composition = outcome
+
+        if outcome['status'] != 'ok' or not outcome.get('best'):
+            return None
+
+        best = dict(outcome['best'])
+        best['reason'] = ' | '.join(outcome['reasons'])
+        best['_alert'] = outcome.get('alert')
         return best
     
     def generate_recommendation(self, item: Dict) -> Dict:
@@ -265,11 +269,42 @@ class RecommendationEngine:
         # Get applicable preferences
         prefs = self.get_applicable_preferences(item_name, category)
         
-        # Find best vendor
-        best = self.get_best_vendor(prices, prefs)
+        # Compose typed rules -> winner (no LLM in the decision path)
+        best = self.get_best_vendor(prices, prefs,
+                                    item_name=item_name, category=category)
+        composition = getattr(self, 'last_composition', {}) or {}
+        
+        if not best:
+            # Rules excluded every candidate - say which rule, loudly.
+            return {
+                'item': item_name,
+                'item_id': item.get('id'),
+                'category': category,
+                'recommended_vendor': 'No candidate',
+                'vendor_id': None,
+                'price': None,
+                'unit': None,
+                'reason': composition.get('offending_rule') or
+                          'Preference rules exclude every vendor',
+                'reasons': list(composition.get('reasons', [])),
+                'trend_icon': '🚫',
+                'trend': 'excluded',
+                'alert': composition.get('offending_rule'),
+                'all_prices': prices,
+                'avg_price': avg_price,
+                'max_price': None,
+                'savings_vs_avg': 0,
+                'savings_vs_max': 0,
+                'savings_pct': 0
+            }
+        
+        # F-19: trend arrow tracks THIS vendor's own history, today excluded
+        baseline = self.db.get_vendor_trend_baseline(
+            item_name, best['vendor'])
+        trend_input = baseline if baseline is not None else avg_price
         
         # Calculate trend
-        trend_info = self.calculate_trend(best['price'], avg_price)
+        trend_info = self.calculate_trend(best['price'], trend_input)
         
         # Calculate max price from all vendors
         max_price = max(p.get('price', 0) for p in prices) if prices else None
@@ -286,19 +321,8 @@ class RecommendationEngine:
             savings_vs_max = max_price - best['price']
             savings_pct = (savings_vs_max / max_price) * 100 if max_price > 0 else 0
         
-        # Check for price threshold alerts from preferences
-        alert = trend_info.get('alert')
-        for pref in prefs:
-            if pref.get('rule_type') == 'price_threshold':
-                condition = pref.get('condition', '')
-                # Simple price threshold check
-                if '>' in condition:
-                    try:
-                        threshold = float(condition.split('>')[-1].strip().replace('$', ''))
-                        if best['price'] > threshold:
-                            alert = f"Price ${best['price']:.2f} exceeds threshold ${threshold:.2f}"
-                    except ValueError:
-                        pass
+        # Alerts: rule thresholds first (typed), then trend spike/deal note
+        alert = best.get('_alert') or trend_info.get('alert')
         
         # Get vendor_id for the recommended vendor
         vendor_id = None
@@ -315,6 +339,7 @@ class RecommendationEngine:
             'price': best.get('price'),
             'unit': best.get('unit', 'Each'),
             'reason': best.get('reason', 'Lowest price'),
+            'reasons': list(composition.get('reasons', [])),
             'trend_icon': trend_info['icon'],
             'trend': trend_info['trend'],
             'change_pct': trend_info.get('change_pct', 0),
@@ -509,7 +534,8 @@ class RecommendationEngine:
             }
         
         prefs = self.get_applicable_preferences(item_name)
-        best = self.get_best_vendor(prices, prefs)
+        best = self.get_best_vendor(prices, prefs,
+                                    item_name=item_name) or {}
         
         # Add comparison info to each price
         for price in prices:

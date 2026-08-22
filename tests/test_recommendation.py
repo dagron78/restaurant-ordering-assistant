@@ -62,46 +62,50 @@ class TestCalculateTrend:
 
 
 class TestGetBestVendor:
+    """Delegation to core.rules.apply_rules — full semantics covered in
+    tests/test_rules.py; these pin the engine wiring."""
+
     PRICES = [
-        {'vendor': 'Sysco', 'price': 24.50},
-        {'vendor': 'US Foods', 'price': 28.00},
+        {"vendor": "Sysco", "vendor_id": 1, "price": 24.50},
+        {"vendor": "US Foods", "vendor_id": 2, "price": 28.00},
     ]
 
     def test_empty_prices_returns_none(self, engine):
-        assert engine.get_best_vendor([]) is None
+        assert engine.get_best_vendor([], []) is None
 
     def test_lowest_price_by_default(self, engine):
         best = engine.get_best_vendor(self.PRICES)
         assert best['vendor'] == 'Sysco'
-        assert best['reason'] == 'Lowest price'
+        assert 'cheapest remaining' in best['reason']
 
-    def test_preferred_vendor_wins_within_premium(self, engine):
-        rules = [{'rule_type': 'vendor_preference',
-                  'condition': 'always',
-                  'action': 'Prefer US Foods'}]
-        best = engine.get_best_vendor(self.PRICES, rules)
+    def test_preferred_vendor_wins_within_tolerance(self, engine):
+        rules = [{"id": 1, "rule_type": "vendor_preference",
+                  "item_pattern": "*", "priority": 0,
+                  "action": "Prefer US Foods",
+                  "condition_json": {"prefer_vendor": "US Foods",
+                                     "switch_if_cheaper_pct": 15}}]
+        best = engine.get_best_vendor(self.PRICES, rules, item_name="W")
         # 14% premium is inside the 15% tolerance
         assert best['vendor'] == 'US Foods'
-        assert 'Preferred vendor' in best['reason']
-
-    def test_preferred_vendor_rejected_beyond_premium(self, engine):
-        rules = [{'rule_type': 'vendor_preference',
-                  'condition': 'always',
-                  'action': 'Prefer US Foods'}]
-        prices = [
-            {'vendor': 'Sysco', 'price': 20.00},
-            {'vendor': 'US Foods', 'price': 30.00},  # 50% premium > 15%
-        ]
-        best = engine.get_best_vendor(prices, rules)
-        assert best['vendor'] == 'Sysco'
 
     def test_exclusion_removes_vendor(self, engine):
-        rules = [{'rule_type': 'exclusion',
-                  'condition': 'never',
-                  'action': 'Never buy from US Foods'}]
-        best = engine.get_best_vendor(self.PRICES, rules)
+        rules = [{"id": 1, "rule_type": "exclusion",
+                  "item_pattern": "*", "priority": 0,
+                  "action": "Never buy from US Foods",
+                  "condition_json": {"vendor": "US Foods"}}]
+        best = engine.get_best_vendor(self.PRICES, rules, item_name="W")
         assert best['vendor'] == 'Sysco'
-        assert 'excluding' in best['reason']
+        assert any('excluded' in r for r in
+                   engine.last_composition['reasons'])
+
+    def test_all_excluded_surfaces_offending_rule(self, engine):
+        prices = [{"vendor": "Sysco", "vendor_id": 1, "price": 20.0}]
+        rules = [{"id": 9, "rule_type": "exclusion",
+                  "item_pattern": "*", "priority": 0,
+                  "action": "Never Sysco",
+                  "condition_json": {"vendor": "Sysco"}}]
+        assert engine.get_best_vendor(prices, rules, item_name="W") is None
+        assert 'rule 9' in engine.last_composition['offending_rule']
 
 
 class TestGenerateRecommendation:
@@ -131,10 +135,13 @@ class TestGenerateRecommendation:
         assert rec['savings_pct'] == pytest.approx((8.00 / 30.00) * 100)
 
     def test_price_threshold_alert_fires(self, engine):
+        """Thresholds come from the rule's structured condition (#17/#20),
+        evaluated by core.rules on the final winner."""
         load_rules(engine, [{
+            'id': 3,
             'rule_type': 'price_threshold',
             'item_pattern': '*',
-            'condition': 'price > 50',
+            'condition_json': {'comparator': '>', 'threshold': 50},
             'action': 'Alert',
         }])
         item = {
@@ -145,7 +152,8 @@ class TestGenerateRecommendation:
             'prices': [{'vendor': 'Sysco', 'price': 55.00}],
         }
         rec = engine.generate_recommendation(item)
-        assert rec['alert'] and 'exceeds threshold' in rec['alert']
+        assert rec['alert'] and 'threshold' in rec['alert']
+        assert any('rule 3' in r for r in rec.get('reasons', []))
 
 
 class TestOrderSavingsMath:

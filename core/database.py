@@ -23,7 +23,7 @@ LATEST_PRICE_RANK_ORDER = "ph.date_recorded DESC, ph.created_at DESC, ph.id DESC
 # Highest schema version implemented by scripts/migrations/. Bump it together
 # with a new NNN_*.sql file there; PRAGMA user_version on real databases
 # records how far each one has come.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 MIGRATIONS_DIR = Config.BASE_DIR / "scripts" / "migrations"
 
 
@@ -625,37 +625,70 @@ class Database:
     # PREFERENCES OPERATIONS
     # ==========================================
     
-    def save_preferences(self, preferences: List[Dict]) -> int:
+    def save_preferences(self, preferences: List[Dict],
+                         source_hash: str = None) -> int:
         """
-        Save parsed preferences to database.
-        
-        Args:
-            preferences: List of preference dicts from AI parser
-            
-        Returns:
-            Number of preferences saved
+        Replace all stored preferences (WRITE path only - reads never call
+        this). Each rule may carry 'condition' as a dict (structured
+        predicate -> condition_json) or a string (legacy prose ->
+        condition_text). source_hash is stamped on every row and in
+        prefs_meta so load_preferences can skip Gemini until the file
+        changes.
         """
+        import json as _json
+        count = 0
         with self.get_connection() as conn:
-            # Clear existing preferences
             conn.execute("DELETE FROM preferences")
-            
-            count = 0
             for pref in preferences:
+                cond = pref.get('condition')
+                if isinstance(cond, dict):
+                    cond_text = _json.dumps(cond)
+                    cond_json = _json.dumps(cond)
+                elif cond is None and pref.get('condition_json'):
+                    cond_json = (pref['condition_json']
+                                 if isinstance(pref['condition_json'], str)
+                                 else _json.dumps(pref['condition_json']))
+                    cond_text = cond_json
+                else:
+                    cond_text = str(cond or '')
+                    cond_json = None
                 conn.execute("""
-                    INSERT INTO preferences 
-                    (rule_type, item_pattern, condition_text, action_text, raw_note)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO preferences
+                    (rule_type, item_pattern, condition_text, action_text,
+                     priority, is_active, raw_note, condition_json, source_hash)
+                    VALUES (?, ?, ?, ?, COALESCE(?, 0), 1, ?, ?, ?)
                 """, (
                     pref.get('rule_type', 'vendor_preference'),
                     pref.get('item_pattern', '*'),
-                    pref.get('condition', pref.get('condition_text', '')),
+                    cond_text,
                     pref.get('action', pref.get('action_text', '')),
-                    pref.get('raw_note', '')
+                    pref.get('priority'),
+                    pref.get('raw_note', ''),
+                    cond_json,
+                    source_hash,
                 ))
                 count += 1
-            
-            return count
-    
+            if source_hash is not None:
+                conn.execute(
+                    "INSERT INTO prefs_meta (key, value) VALUES ('source_hash', ?)"
+                    " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    (source_hash,))
+        return count
+
+    def get_pref_meta(self, key: str) -> Optional[str]:
+        with self.get_connection() as conn:
+            row = conn.execute(
+                "SELECT value FROM prefs_meta WHERE key = ?", (key,)).fetchone()
+            return row["value"] if row else None
+
+    def set_pref_meta(self, key: str, value: str) -> None:
+        with self.get_connection() as conn:
+            conn.execute(
+                "INSERT INTO prefs_meta (key, value) VALUES (?, ?)"
+                " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, str(value)))
+
+
     def get_preferences(self, active_only: bool = True) -> List[Dict]:
         """Get all preferences."""
         with self.get_connection() as conn:

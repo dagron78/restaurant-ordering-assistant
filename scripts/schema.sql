@@ -65,7 +65,18 @@ CREATE TABLE IF NOT EXISTS preferences (
     is_active BOOLEAN DEFAULT 1,
     raw_note TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    -- Phase 3 (issue #20): typed predicate from the parser (JSON), and the
+    -- content hash of preferences.txt that produced this row. The hash lets
+    -- load_preferences skip Gemini until the file actually changes.
+    condition_json TEXT,
+    source_hash TEXT
+);
+
+-- Phase 3: tiny meta store for parser cache bookkeeping (last source hash).
+CREATE TABLE IF NOT EXISTS prefs_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT
 );
 
 -- ===========================================
