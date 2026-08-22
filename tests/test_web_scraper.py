@@ -78,7 +78,8 @@ class TestTileMatching:
             'Heavy Cream 40% - Case of 12 - $29.99', 'Heavy Cream 40%')
 
     def test_partial_overlap_still_accepted(self):
-        # At least half the item tokens present
+        # Deliberate limitation: whipped topping is a different product,
+        # but distinguishing variants needs product-identity matching.
         assert VendorScraper._tile_matches_item(
             'Heavy Cream Whipped Topping', 'Heavy Cream')
 
@@ -92,6 +93,43 @@ class TestTileMatching:
 
     def test_case_insensitive(self):
         assert VendorScraper._tile_matches_item('HEAVY CREAM case', 'heavy cream')
+
+    def test_numeric_grade_required(self):
+        # 80/20 vs 73/27 are different products at different prices
+        assert VendorScraper._tile_matches_item(
+            'Ground Beef 80/20 20lb', 'Ground Beef 80/20')
+        assert not VendorScraper._tile_matches_item(
+            'Ground Beef 73/27 Bulk', 'Ground Beef 80/20')
+
+    def test_short_names_require_all_words(self):
+        # Near-miss neighbours on a food-vendor search page
+        assert not VendorScraper._tile_matches_item(
+            'Whole Wheat Flour 50lb Bag', 'Whole Milk')
+        assert not VendorScraper._tile_matches_item(
+            'Chicken Thighs Boneless', 'Chicken Breast')
+        assert not VendorScraper._tile_matches_item(
+            'Atlantic Cod Fillet', 'Atlantic Salmon')
+        assert not VendorScraper._tile_matches_item(
+            'Heavy Duty Foil Wrap', 'Heavy Cream 40%')   # grade 40 missing
+
+    def test_long_names_use_ceiling_half(self):
+        # 5 words: ceiling(5/2) = 3 hits needed
+        item = 'Olive Oil Extra Virgin Cold'
+        assert VendorScraper._tile_matches_item(
+            'Olive Oil Extra Virgin Cold Pressed 1L', item)
+        assert not VendorScraper._tile_matches_item(
+            'Canola Oil 35lb', 'Olive Oil Extra Virgin')
+
+    def test_true_positives_keep_matching(self):
+        pairs = [
+            ('Sysco Classic Heavy Cream 40% Case', 'Heavy Cream 40%'),
+            ('Fresh Ground Beef 80/20 per Lb', 'Ground Beef 80/20'),
+            ('Chicken Breast Boneless Skinless', 'Chicken Breast'),
+            ('Atlantic Salmon Fillet Fresh', 'Atlantic Salmon'),
+            ('Whole Milk Gallon Grade A', 'Whole Milk'),
+        ]
+        for tile, item in pairs:
+            assert VendorScraper._tile_matches_item(tile, item), (tile, item)
 
 
 class TestExtractionFiltering:

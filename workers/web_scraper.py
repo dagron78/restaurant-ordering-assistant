@@ -6,6 +6,7 @@ Uses session persistence to maintain login state between runs.
 """
 
 import sys
+import math
 import re
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -216,9 +217,20 @@ class VendorScraper(ABC):
         """
         Check whether a product tile's text plausibly belongs to the item.
         
-        Accepts when at least half of the item's significant tokens appear
-        in the tile text. Guards against storing the price of whatever
-        product happens to sit first on a search results page.
+        Guards against storing the price of a near-miss neighbour (Ground
+        Turkey 93/7 for Ground Beef 80/20, foil wrap for Heavy Cream 40%).
+        
+        Rules:
+        - tokens shorter than 3 chars are dropped UNLESS numeric: '40',
+          '80', '20' are the grade markers that separate SKUs
+        - every numeric token in the item name must appear in the tile:
+          80/20 is not 73/27
+        - short names (<=3 words): ALL words must match; longer names use
+          a ceiling-half threshold
+        
+        Note this deliberately still accepts e.g. 'Heavy Cream Whipped
+        Topping' for 'Heavy Cream' - distinguishing product variants
+        needs product-identity matching, out of scope here.
         
         Args:
             tile_text: Text of the candidate product tile
@@ -228,15 +240,25 @@ class VendorScraper(ABC):
             True if the tile looks like the searched product
         """
         def tokenize(text: str) -> List[str]:
-            return [t for t in re.findall(r'[a-z0-9]+', text.lower()) if len(t) > 2]
+            return [t for t in re.findall(r'[a-z0-9]+', text.lower())
+                    if len(t) > 2 or t.isdigit()]
         
         item_tokens = tokenize(item_name)
         if not item_tokens:
             return bool(tile_text and tile_text.strip())
         
         tile_tokens = set(tokenize(tile_text))
-        hits = sum(1 for token in item_tokens if token in tile_tokens)
-        return hits >= max(1, len(item_tokens) // 2)
+        
+        # Every grade/size number must be present in the tile
+        numerics = [t for t in item_tokens if any(ch.isdigit() for ch in t)]
+        if any(t not in tile_tokens for t in numerics):
+            return False
+        
+        words = [t for t in item_tokens if t not in numerics]
+        hits = sum(1 for t in words if t in tile_tokens)
+        if len(words) <= 3:
+            return hits == len(words)
+        return hits >= math.ceil(len(words) / 2)
     
     def _extract_price_via_selectors(self, page: Any, item_name: str,
                                      price_selectors: List[str],
