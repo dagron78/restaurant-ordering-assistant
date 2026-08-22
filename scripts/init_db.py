@@ -85,8 +85,6 @@ def init_database(reset: bool = False) -> None:
     status_icons = {True: '✓', False: '✗'}
     print(f"   {status_icons[validation['gemini_api']]} Gemini API key configured")
     print(f"   {status_icons[validation['email']]} Email credentials configured")
-    print(f"   {status_icons[validation['sysco']]} Sysco credentials configured")
-    print(f"   {status_icons[validation['usfoods']]} US Foods credentials configured")
     
     if not validation['gemini_api']:
         print("\n⚠️  Warning: Gemini API key not configured.")

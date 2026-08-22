@@ -14,10 +14,13 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 
+from app.components.auth_gate import require_login
 from core.database import Database
 from core.recommendation import RecommendationEngine
 
 st.set_page_config(page_title="Order Guide", page_icon="📋", layout="wide")
+
+require_login()
 
 st.title("📋 Weekly Order Guide")
 st.markdown("*AI-powered recommendations based on prices and your preferences*")
@@ -339,12 +342,27 @@ if (generate_summary or save_order) and order_items:
                     })
             
             if db_order_items:
+                # Report savings for what is actually being saved - items
+                # missing an id were dropped above and must not inflate it
+                saved_savings = engine.calculate_order_savings([
+                    {
+                        'qty': entry['quantity'],
+                        'unit_price': entry['unit_price'],
+                        'avg_price': entry.get('avg_price') or entry['unit_price'],
+                        'max_price': entry.get('max_price') or entry['unit_price'],
+                    }
+                    for entry in db_order_items
+                ])
+                
                 order_id = db.create_order(
                     db_order_items,
                     notes=f"Order created on {datetime.now().strftime('%Y-%m-%d %H:%M')}",
                     status='completed'  # Saved orders count toward savings dashboards
                 )
-                st.success(f"✅ Order #{order_id} saved! Total savings: ${savings_info['total_savings_vs_max']:.2f}")
+                st.success(f"✅ Order #{order_id} saved! Total savings: ${saved_savings['total_savings_vs_max']:.2f}")
+                dropped = len(order_items) - len(db_order_items)
+                if dropped:
+                    st.warning(f"⚠️ {dropped} item(s) skipped (missing vendor/item data).")
                 
                 # Clear quantities after saving (both the dict and the
                 # number_input widget states keyed by item name)

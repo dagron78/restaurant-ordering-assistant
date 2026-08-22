@@ -72,13 +72,17 @@ def create_scheduler() -> BlockingScheduler:
     )
     logger.info(f"Scheduled email check every {email_interval} hours")
     
-    # Weekly scrape - Monday at configured hour
+    # Weekly scrape - configured day at configured hour
     scrape_day = Config.SCRAPE_DAY  # 0 = Monday
     scrape_hour = Config.SCRAPE_HOUR
     
-    # Convert day number to cron day (mon=0 in our config, but cron uses mon-sun)
+    # A bad env var must not crash the scheduler with an IndexError
     cron_days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
-    cron_day = cron_days[scrape_day]
+    if isinstance(scrape_day, int) and 0 <= scrape_day < len(cron_days):
+        cron_day = cron_days[scrape_day]
+    else:
+        logger.warning(f"Invalid SCRAPE_DAY={scrape_day!r}; falling back to Monday")
+        cron_day = cron_days[0]
     
     scheduler.add_job(
         scrape_job,

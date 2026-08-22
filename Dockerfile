@@ -41,14 +41,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright browsers
+# Install Playwright browsers (fixed path so the app user can read them)
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 RUN playwright install chromium
 
 # Copy application code
 COPY . .
 
-# Create necessary directories
-RUN mkdir -p data/sessions data/temp
+# Create necessary directories and an unprivileged runtime user.
+# The container no longer runs as root; /app/data is where volumes mount.
+RUN useradd --create-home --uid 1000 appuser \
+    && mkdir -p data/sessions data/temp \
+    && chown -R appuser:appuser /app /opt/pw-browsers
+
+USER appuser
 
 # Expose Streamlit port
 EXPOSE 8501

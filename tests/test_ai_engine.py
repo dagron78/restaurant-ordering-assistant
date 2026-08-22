@@ -133,20 +133,59 @@ class TestRetryBehaviour:
 
 
 class TestValidateExtractedPrices:
-    def test_falls_back_to_originals_on_bad_json(self, engine, monkeypatch):
-        prices = [{'item_name': 'Flour', 'price': 18.0, 'unit': 'Bag'}]
-        monkeypatch.setattr(engine, '_call_with_retry',
-                            lambda model, content, generation_config=None: '{{{')
-        result = engine.validate_extracted_prices(prices)
+    """F-14: validation is deterministic - no LLM round-trip that could
+    write hallucinated corrections back into the price table."""
 
-        assert result == prices
-        assert result[0]['confidence'] == 0.8
+    def test_keeps_clean_rows_and_normalizes(self, engine):
+        raw = [
+            {'item_name': '  Flour ', 'price': '18.00', 'unit': ' Bag '},
+        ]
+        result = engine.validate_extracted_prices(raw)
 
-    def test_passes_through_validated_list(self, engine, monkeypatch):
-        validated = [{'item_name': 'Flour', 'price': 18.0, 'confidence': 0.95}]
-        monkeypatch.setattr(engine, '_call_with_retry',
-                            lambda model, content, generation_config=None: json.dumps(validated))
-        assert engine.validate_extracted_prices([{'item_name': 'flour', 'price': 18.0}]) == validated
+        assert result == [{
+            'item_name': 'Flour',
+            'price': 18.0,
+            'unit': 'Bag',
+            'vendor': 'Unknown',
+            'confidence': 1.0,
+        }]
 
-    def test_empty_input_short_circuits(self, engine):
+    def test_drops_missing_or_unparseable_prices(self, engine):
+        raw = [
+            {'item_name': 'No Price'},
+            {'item_name': 'Bad Price', 'price': 'abc'},
+            {'price': 5.0},                      # no name
+        ]
+        assert engine.validate_extracted_prices(raw) == []
+
+    def test_drops_out_of_bounds_prices(self, engine):
+        raw = [
+            {'item_name': 'Free', 'price': 0},
+            {'item_name': 'Negative', 'price': -3.0},
+            {'item_name': 'Absurd', 'price': 999_999.0},
+            {'item_name': 'Fine', 'price': 12.5},
+        ]
+        result = engine.validate_extracted_prices(raw)
+        assert [r['item_name'] for r in result] == ['Fine']
+
+    def test_dedupes_identical_lines(self, engine):
+        raw = [
+            {'item_name': 'Flour', 'price': 18.0, 'unit': 'Bag', 'vendor': 'Sysco'},
+            {'item_name': 'flour', 'price': 18.0, 'unit': 'bag', 'vendor': 'SYSCO'},
+        ]
+        assert len(engine.validate_extracted_prices(raw)) == 1
+
+    def test_confidence_is_clamped(self, engine):
+        raw = [{'item_name': 'Flour', 'price': 1.0, 'confidence': 5}]
+        assert engine.validate_extracted_prices(raw)[0]['confidence'] == 1.0
+
+    def test_makes_no_api_calls(self, engine, monkeypatch):
+        """The whole point: validation must not depend on the model."""
+        def boom(*args, **kwargs):
+            raise AssertionError('validate_extracted_prices must not call the API')
+
+        monkeypatch.setattr(engine, '_call_with_retry', boom)
+        engine.validate_extracted_prices([{'item_name': 'X', 'price': 2}])
+
+    def test_empty_input(self, engine):
         assert engine.validate_extracted_prices([]) == []

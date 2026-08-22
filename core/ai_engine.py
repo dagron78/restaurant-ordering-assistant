@@ -389,47 +389,72 @@ class GeminiEngine:
         response = self._call_with_retry(self.model_flash, prompt)
         return response.strip() if response else None
     
+    # Sanity bounds for a single price line - anything outside is treated
+    # as an extraction error rather than reality.
+    MIN_SANE_PRICE = 0.01
+    MAX_SANE_PRICE = 100_000.0
+    
     def validate_extracted_prices(self, prices: List[Dict]) -> List[Dict]:
         """
-        Validate and clean extracted prices using AI.
+        Deterministically validate extracted price lines.
+        
+        Deliberately does NOT send the numbers back to the model for
+        "fixing": whatever an LLM returns would be written unchecked, and
+        a hallucinated correction is indistinguishable from a real one.
+        Instead, apply mechanical rules and drop anything questionable:
+        
+        - requires a non-empty item_name and a parseable numeric price
+        - rejects prices outside sane bounds
+        - normalizes names/units, defaults vendor to 'Unknown'
+        - drops exact duplicates within the batch
         
         Args:
-            prices: List of price dicts from document parsing
+            prices: List of raw price dicts from document parsing
             
         Returns:
-            Validated and standardized prices
+            Clean list of price dicts ready for storage
         """
         if not prices:
             return []
         
-        prompt = f"""
-        Review and validate these extracted restaurant product prices.
-        Fix any obvious errors and standardize the data.
+        validated = []
+        seen = set()
         
-        Extracted prices:
-        {json.dumps(prices, indent=2)}
+        for raw in prices:
+            if not isinstance(raw, dict):
+                continue
+            
+            name = str(raw.get('item_name', '') or '').strip()
+            if not name or len(name) > 200:
+                continue
+            
+            try:
+                price = float(raw.get('price'))
+            except (TypeError, ValueError):
+                continue
+            
+            if not (self.MIN_SANE_PRICE <= price <= self.MAX_SANE_PRICE):
+                print(f"Dropping {name!r}: price {price} outside sane bounds")
+                continue
+            
+            unit = str(raw.get('unit') or 'Each').strip() or 'Each'
+            vendor = str(raw.get('vendor') or 'Unknown').strip() or 'Unknown'
+            
+            key = (name.lower(), vendor.lower(), unit.lower(), round(price, 2))
+            if key in seen:
+                continue
+            seen.add(key)
+            
+            validated.append({
+                'item_name': name,
+                'price': price,
+                'unit': unit,
+                'vendor': vendor,
+                'confidence': min(float(raw.get('confidence', 1.0) or 1.0), 1.0),
+            })
         
-        For each item:
-        1. Standardize item names (proper capitalization, clear descriptions)
-        2. Verify price makes sense for the unit (e.g., case vs each)
-        3. Flag any suspicious prices (too high or too low)
-        4. Ensure unit is standardized (Case, Lb, Each, Gallon, etc.)
+        dropped = len(prices) - len(validated)
+        if dropped:
+            print(f"Price validation dropped {dropped} of {len(prices)} extracted rows")
         
-        Return a JSON array with the same structure, adding:
-        - "confidence": 0.0-1.0 confidence score
-        - "flag": Optional warning if price seems wrong
-        
-        Return ONLY valid JSON array.
-        """
-        
-        response = self._call_with_retry(self.model_flash, prompt)
-        clean_json = self._clean_json_response(response)
-        
-        try:
-            validated = json.loads(clean_json)
-            return validated if isinstance(validated, list) else prices
-        except json.JSONDecodeError:
-            # Return original with default confidence
-            for p in prices:
-                p['confidence'] = 0.8
-            return prices
+        return validated

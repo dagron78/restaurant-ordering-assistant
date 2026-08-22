@@ -175,20 +175,36 @@ class Database:
             return dict(row) if row else None
     
     def get_or_create_vendor(self, name: str) -> int:
-        """Get vendor ID, creating if necessary."""
+        """Get vendor ID, creating if necessary.
+        
+        Raises:
+            ValueError: If name is empty or whitespace
+        """
+        if not name or not name.strip():
+            raise ValueError("Vendor name cannot be empty")
+        
         with self.get_connection() as conn:
-            cursor = conn.execute(
-                "SELECT id FROM vendors WHERE name = ?", (name,)
-            )
-            row = cursor.fetchone()
-            
-            if row:
-                return row['id']
-            
-            cursor = conn.execute(
-                "INSERT INTO vendors (name) VALUES (?)", (name,)
-            )
-            return cursor.lastrowid
+            return self._get_or_create_vendor(conn, name)
+    
+    def _get_or_create_vendor(self, conn: sqlite3.Connection, name: str) -> int:
+        """Get-or-create a vendor using an existing connection.
+        
+        Raises:
+            ValueError: If name is empty or whitespace
+        """
+        if not name or not name.strip():
+            raise ValueError("Vendor name cannot be empty")
+        
+        cursor = conn.execute("SELECT id FROM vendors WHERE name = ?", (name.strip(),))
+        row = cursor.fetchone()
+        
+        if row:
+            return row['id']
+        
+        cursor = conn.execute(
+            "INSERT INTO vendors (name) VALUES (?)", (name.strip(),)
+        )
+        return cursor.lastrowid
     
     def get_all_vendors(self) -> List[Dict]:
         """Get all vendors."""
@@ -240,43 +256,95 @@ class Database:
         vendor_id = self.get_or_create_vendor(vendor_name)
         
         with self.get_connection() as conn:
-            cursor = conn.execute(
-                """INSERT INTO price_history 
-                   (item_id, vendor_id, price, unit, source, confidence,
-                    raw_text, date_recorded)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_DATE))""",
-                (item_id, vendor_id, price, unit, source, confidence,
-                 raw_text, date_recorded)
+            return self._insert_price(
+                conn, item_id, vendor_id, price, unit, source,
+                confidence, raw_text, date_recorded
             )
-            return cursor.lastrowid
+    
+    def _resolve_item_id(self, conn: sqlite3.Connection, item_name: str,
+                         unit: str = None) -> int:
+        """Get or create an item using an existing connection."""
+        cursor = conn.execute("SELECT id FROM items WHERE name = ?", (item_name,))
+        row = cursor.fetchone()
+        if row:
+            return row['id']
+        
+        cursor = conn.execute(
+            "INSERT INTO items (name, default_unit) VALUES (?, ?)",
+            (item_name, unit)
+        )
+        return cursor.lastrowid
+    
+    def _insert_price(self, conn: sqlite3.Connection, item_id: int,
+                      vendor_id: int, price: float, unit: str,
+                      source: str, confidence: float,
+                      raw_text: str = None,
+                      date_recorded: str = None) -> int:
+        """Insert one price row using an existing connection."""
+        cursor = conn.execute(
+            """INSERT INTO price_history 
+               (item_id, vendor_id, price, unit, source, confidence,
+                raw_text, date_recorded)
+               VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_DATE))""",
+            (item_id, vendor_id, price, unit, source, confidence,
+             raw_text, date_recorded)
+        )
+        return cursor.lastrowid
     
     def add_prices_batch(self, prices: List[Dict], source: str = 'manual') -> int:
         """
         Add multiple prices in a single transaction.
         
+        Uses ONE connection and commit for the whole batch. A row that
+        fails validation is skipped without aborting the others; failures
+        are logged rather than silently swallowed.
+        
         Args:
-            prices: List of dicts with keys: item_name, vendor_name, price, unit
+            prices: List of dicts with keys: item_name, vendor_name, price
+                (optional: unit, confidence)
             source: Source type for all prices
             
         Returns:
             Number of prices added
         """
-        count = 0
-        for price_data in prices:
-            try:
-                self.add_price(
-                    item_name=price_data['item_name'],
-                    vendor_name=price_data.get('vendor_name', price_data.get('vendor', 'Unknown')),
-                    price=float(price_data['price']),
-                    unit=price_data.get('unit', 'Each'),
-                    source=source,
-                    confidence=price_data.get('confidence', 0.9)
-                )
-                count += 1
-            except Exception as e:
-                print(f"Error adding price for {price_data.get('item_name')}: {e}")
+        added = 0
         
-        return count
+        with self.get_connection() as conn:
+            # Enforce FKs on this connection too - get_connection does it,
+            # but keep the batch self-evidently safe.
+            for price_data in prices:
+                item_name = price_data.get('item_name')
+                
+                try:
+                    if not item_name or not str(item_name).strip():
+                        raise ValueError("missing item_name")
+                    
+                    price = float(price_data['price'])
+                    vendor_name = price_data.get('vendor_name',
+                                                 price_data.get('vendor', 'Unknown'))
+                    unit = price_data.get('unit') or 'Each'
+                    confidence = float(price_data.get('confidence', 0.9))
+                    
+                    conn.execute("SAVEPOINT row_sp")
+                    try:
+                        item_id = self._resolve_item_id(conn, str(item_name).strip(), unit)
+                        vendor_id = self._get_or_create_vendor(conn, vendor_name)
+                        self._insert_price(
+                            conn, item_id, vendor_id, price, unit, source, confidence
+                        )
+                    except Exception:
+                        conn.execute("ROLLBACK TO row_sp")
+                        raise
+                    finally:
+                        conn.execute("RELEASE row_sp")
+                    
+                    added += 1
+                    
+                except Exception as e:
+                    print(f"Skipping price for {item_name!r}: {e}")
+                    continue
+        
+        return added
     
     def get_latest_prices(self, item_name: str) -> List[Dict]:
         """
@@ -368,16 +436,71 @@ class Database:
         """
         Get all active items with their latest prices and averages.
         
+        Single query: latest-per-vendor via window function (matching
+        get_latest_prices semantics), 30-day average per item, joined to
+        the item list. Replaces the previous two-queries-per-item loop.
+        
         Returns:
             List of items with prices and trend data
         """
-        items = self.get_all_items(active_only=True)
+        cutoff_date = (datetime.now() - timedelta(days=Config.TREND_DAYS)).strftime('%Y-%m-%d')
         
-        for item in items:
-            item['prices'] = self.get_latest_prices(item['name'])
-            item['avg_price'] = self.get_average_price(item['name'])
+        with self.get_connection() as conn:
+            cursor = conn.execute("""
+                WITH latest AS (
+                    SELECT ph.item_id, ph.vendor_id, ph.price, ph.unit,
+                           ph.date_recorded, ph.source,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY ph.item_id, ph.vendor_id
+                               ORDER BY ph.created_at DESC, ph.id DESC
+                           ) as rn
+                    FROM price_history ph
+                ),
+                avgs AS (
+                    SELECT item_id, AVG(price) as avg_price
+                    FROM price_history
+                    WHERE date_recorded >= ?
+                    GROUP BY item_id
+                )
+                SELECT i.id, i.name, i.category, i.default_unit,
+                       v.name as vendor, r.price, r.unit,
+                       r.date_recorded, r.source, a.avg_price
+                FROM items i
+                LEFT JOIN latest r ON r.item_id = i.id AND r.rn = 1
+                LEFT JOIN vendors v ON v.id = r.vendor_id
+                LEFT JOIN avgs a ON a.item_id = i.id
+                WHERE i.is_active = 1
+                ORDER BY i.category, i.name
+            """, (cutoff_date,))
+            
+            rows = [dict(row) for row in cursor.fetchall()]
         
-        return items
+        items = {}
+        for row in rows:
+            item = items.setdefault(row['id'], {
+                'id': row['id'],
+                'name': row['name'],
+                'category': row['category'],
+                'default_unit': row['default_unit'],
+                'prices': [],
+                'avg_price': None,
+            })
+            if row['vendor'] is not None:
+                item['prices'].append({
+                    'vendor': row['vendor'],
+                    'price': row['price'],
+                    'unit': row['unit'],
+                    'date_recorded': row['date_recorded'],
+                    'source': row['source'],
+                })
+            if row['avg_price'] is not None:
+                item['avg_price'] = row['avg_price']
+        
+        # Keep the documented shape: prices sorted cheapest-first
+        for item in items.values():
+            item['prices'].sort(key=lambda p: p['price'])
+        
+        return list(items.values())
     
     # ==========================================
     # PREFERENCES OPERATIONS
@@ -731,14 +854,29 @@ class Database:
                     SUM(oi.savings_vs_avg) as savings_vs_avg,
                     SUM(oi.savings_vs_max) as savings_vs_max,
                     AVG(oi.unit_price) as avg_unit_price,
-                    v.name as most_used_vendor
+                    (
+                        SELECT v2.name
+                        FROM order_items oi2
+                        JOIN vendors v2 ON v2.id = oi2.vendor_id
+                        JOIN orders o2 ON o2.id = oi2.order_id
+                        WHERE oi2.item_id = i.id AND o2.status = 'completed'
+            """
+            params = []
+            
+            if order_id:
+                query += " AND oi2.order_id = ?"
+                params.append(order_id)
+            
+            query += """
+                        GROUP BY v2.id
+                        ORDER BY SUM(oi2.total_price) DESC
+                        LIMIT 1
+                    ) as most_used_vendor
                 FROM order_items oi
                 JOIN items i ON oi.item_id = i.id
-                JOIN vendors v ON oi.vendor_id = v.id
                 JOIN orders o ON oi.order_id = o.id
                 WHERE o.status = 'completed'
             """
-            params = []
             
             if order_id:
                 query += " AND oi.order_id = ?"

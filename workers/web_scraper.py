@@ -302,6 +302,28 @@ class VendorScraper(ABC):
         """
         return price_data.get('unit') or item.get('default_unit', 'Each')
     
+    # Cap on how much page HTML is ever handed to the AI fallback
+    MAX_HTML_CHARS = 4000
+    
+    @classmethod
+    def _scrub_html(cls, html: str) -> str:
+        """
+        Strip scripts, styles and comments from page HTML before sending
+        it to a third-party service.
+        
+        Logged-in vendor pages can embed account numbers, contract
+        pricing and session tokens in script blocks - none of that is
+        needed to locate a price element, so it never leaves the machine.
+        """
+        scrubbed = re.sub(r'<script\b.*?</script>', '', html,
+                          flags=re.IGNORECASE | re.DOTALL)
+        scrubbed = re.sub(r'<style\b.*?</style>', '', scrubbed,
+                          flags=re.IGNORECASE | re.DOTALL)
+        scrubbed = re.sub(r'<!--.*?-->', '', scrubbed,
+                          flags=re.DOTALL)
+        scrubbed = re.sub(r'\s+', ' ', scrubbed).strip()
+        return scrubbed[:cls.MAX_HTML_CHARS]
+    
     def scrape_item(self, item_name: str) -> Optional[Dict]:
         """
         Scrape price for a single item.
@@ -365,6 +387,7 @@ class VendorScraper(ABC):
             }
         
         from playwright.sync_api import sync_playwright
+        import time
         
         # Get all active items
         items = self.db.get_all_items(active_only=True)
@@ -384,9 +407,14 @@ class VendorScraper(ABC):
                 page = context.new_page()
                 page.set_default_timeout(self.timeout)
                 
-                for item in items:
+                for index, item in enumerate(items):
                     item_name = item['name']
                     
+                    # Rate limit between lookups - vendor sites throttle
+                    # aggressive sequential requests
+                    if index > 0 and Config.SCRAPE_DELAY_SECS > 0:
+                        time.sleep(Config.SCRAPE_DELAY_SECS)
+                                        
                     try:
                         # Navigate to search
                         search_url = self.get_search_url(item_name)
@@ -485,8 +513,8 @@ class SyscoScraper(VendorScraper):
             if result:
                 return result
             
-            # If no price found with standard selectors, use AI
-            html = page.content()
+            # If no price found with standard selectors, use AI on scrubbed HTML
+            html = self._scrub_html(page.content())
             selectors = self.ai.analyze_html_for_selectors(html, item_name)
             
             if selectors.get('price_selector'):
@@ -538,8 +566,8 @@ class USFoodsScraper(VendorScraper):
             if result:
                 return result
             
-            # If no price found, use AI analysis
-            html = page.content()
+            # If no price found, use AI analysis on scrubbed HTML
+            html = self._scrub_html(page.content())
             selectors = self.ai.analyze_html_for_selectors(html, item_name)
             
             if selectors.get('price_selector'):

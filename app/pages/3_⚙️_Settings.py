@@ -4,7 +4,9 @@ Settings Page - Configuration and Data Management
 Upload documents, manage preferences, and configure system settings.
 """
 
+import re
 import sys
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -12,11 +14,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 import streamlit as st
 import pandas as pd
 
+from app.components.auth_gate import require_login
 from core.config import Config
 from core.database import Database
 from core.ai_engine import GeminiEngine
 
 st.set_page_config(page_title="Settings", page_icon="⚙️", layout="wide")
+
+require_login()
 
 st.title("⚙️ Settings")
 
@@ -76,9 +81,11 @@ with tab1:
             if st.button("🔍 Extract Items", type="primary"):
                 with st.spinner("AI is analyzing the document..."):
                     try:
-                        # Save temp file
+                        # Save temp file under a generated name: client-side
+                        # filenames are never trusted as filesystem paths
                         Config.TEMP_PATH.mkdir(parents=True, exist_ok=True)
-                        temp_path = Config.TEMP_PATH / uploaded_file.name
+                        safe_ext = re.sub(r'[^a-z0-9.]', '', uploaded_file.name.rsplit('.', 1)[-1].lower())[:8]
+                        temp_path = Config.TEMP_PATH / f"upload_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{safe_ext or 'bin'}"
                         
                         with open(temp_path, "wb") as f:
                             f.write(uploaded_file.getvalue())
@@ -170,16 +177,20 @@ with tab1:
         submitted = st.form_submit_button("Add Item", type="primary")
         
         if submitted:
-            if item_name:
+            if not item_name:
+                st.error("Item name is required")
+            elif not vendor or not vendor.strip():
+                # Choosing "Other" renders the name field on the next rerun;
+                # submitting before that used to create an unnamed vendor
+                st.error("Vendor name is required when vendor is 'Other'")
+            else:
                 try:
                     db.add_item(item_name, category, unit)
                     if price > 0:
-                        db.add_price(item_name, vendor, price, unit, source='manual')
+                        db.add_price(item_name, vendor.strip(), price, unit, source='manual')
                     st.success(f"Added {item_name}!")
                 except Exception as e:
                     st.error(f"Error: {e}")
-            else:
-                st.error("Item name is required")
 
 # ===========================================
 # TAB 2: PREFERENCES
