@@ -74,6 +74,23 @@ jobs:
       - name: Pytest with warnings as errors (-rs shows skips)
         run: pytest -rs -W error::DeprecationWarning -W error::FutureWarning -p no:cacheprovider
 
+  slow-ui:
+    name: Slow UI tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies (locked)
+        run: pip install -r requirements-lock.txt
+
+      - name: Run slow UI tests explicitly
+        run: pytest tests/test_ui_apptest.py -m slow_ui -rs -v -p no:cacheprovider
+
   docker:
     name: Docker build
     runs-on: ubuntu-latest
