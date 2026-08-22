@@ -6,7 +6,6 @@ stub to prove CACHE behaviour only — parser correctness is covered
 separately against golden fixtures captured from real Gemini output.
 """
 
-import hashlib
 import pytest
 
 from core.recommendation import RecommendationEngine
@@ -67,22 +66,22 @@ class TestParseOncePerHash:
 
     def test_read_path_does_not_wipe_rows(self, db, prefs_file):
         """F-17's other half: reads must not DELETE+reinsert."""
-        seed_rule(db)
-        ai = CountingAI()                            # would produce [] on parse
+        ai = CountingAI(rules=[{"rule_type": "vendor_preference",
+                                "item_pattern": "*",
+                                "condition": {"prefer_vendor": "Sysco"}}])
         engine = RecommendationEngine(db=db, ai=ai)
 
-        with_db_spy = db.save_preferences            # noqa: F841
-        engine.load_preferences(prefs_file)          # parses + writes (hash new)
+        engine.load_preferences(prefs_file)          # parse + write (baseline)
+        n_before = len(db.get_preferences())
 
-        # Second load: hash matches -> pure read; rows untouched, no save
         calls = {"save": 0}
         db.save_preferences = lambda *a, **k: calls.__setitem__("save", calls["save"] + 1)
-        n_before = len(db.get_preferences())
-        engine.load_preferences(prefs_file)
+        engine.load_preferences(prefs_file)          # cached -> pure read
+
         n_after = len(db.get_preferences())
 
-        assert calls["save"] == 0
-        assert n_after == n_before == 1
+        assert calls["save"] == 0                    # no write on read path
+        assert n_after == n_before >= 1              # rows untouched
 
     def test_missing_file_falls_back_to_stored_rows(self, db, tmp_path):
         seed_rule(db)

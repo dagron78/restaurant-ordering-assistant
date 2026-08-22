@@ -12,16 +12,16 @@ Gate items encoded here:
 - threshold comes from the rule (two different thresholds both honoured)
 """
 
-import pytest
 
 from core.rules import apply_rules
 
 
-VENDOR = lambda name, vid, price: {"vendor": name, "vendor_id": vid, "price": price}
+def VENDOR(name, vid, price):
+    return {"vendor": name, "vendor_id": vid, "price": price}
 
 
-def rule(rid, rtype, pattern="*", priority=0, condition=None, action=""):
-    return {"id": rid, "rule_type": rtype, "item_pattern": pattern,
+def rule(rid, rtype, item_pattern="*", priority=0, condition=None, action=""):
+    return {"id": rid, "rule_type": rtype, "item_pattern": item_pattern,
             "priority": priority, "condition_json": condition, "action": action}
 
 
@@ -137,21 +137,24 @@ class TestCompositionAndPriority:
 
     def test_equal_priority_tie_earlier_row_wins(self):
         """Stated tie-break: same priority -> lower id (authored earlier)
-        applies first. Deterministic across runs and SQLite versions."""
+        applies first, and its narrowing sticks. Both input orders below are
+        reversed copies, so only the id sort can explain the shared result."""
         prices = [
             VENDOR("Sysco", 1, 20.0),
             VENDOR("Gfs", 3, 21.0),
         ]
         prefer_gfs_first = [rule(4, "vendor_preference", priority=3, condition={
-            "prefer_vendor": "Gfs", "switch_if_cheaper_pct": 0}),
+            "prefer_vendor": "Gfs", "switch_if_cheaper_pct": 10}),
             rule(9, "vendor_preference", priority=3, condition={
                 "prefer_vendor": "Sysco", "switch_if_cheaper_pct": 0})]
         prefer_sysco_first = list(reversed(prefer_gfs_first))
 
         a = apply_rules(prices, prefer_gfs_first, "W", None)
         b = apply_rules(prices, prefer_sysco_first, "W", None)
-        assert a["best"]["vendor"] == "Gfs"     # id 4 < id 9
-        assert b["best"]["vendor"] == "Gfs"     # ordering of input irrelevant
+        # rule 4 (lower id) runs first in both: keeps Gfs (Sysco is only 5%
+        # cheaper, inside the 10% tolerance); rule 9 then finds no Sysco.
+        assert a["best"]["vendor"] == "Gfs"
+        assert b["best"]["vendor"] == "Gfs"
 
     def test_conflicting_rules_documented_precedence(self):
         """Exclusion beats preference regardless of authored order when the
@@ -179,10 +182,10 @@ class TestPatternMatching:
         prices = [VENDOR("Sysco", 1, 20.0), VENDOR("Gfs", 3, 21.0)]
         cat_rule = [rule(1, "vendor_preference", item_pattern="dairy",
                          condition={"prefer_vendor": "Gfs",
-                                    "switch_if_cheaper_pct": 0})]
+                                    "switch_if_cheaper_pct": 10})]
         sub_rule = [rule(2, "vendor_preference", item_pattern="cream",
                          condition={"prefer_vendor": "Gfs",
-                                    "switch_if_cheaper_pct": 0})]
+                                    "switch_if_cheaper_pct": 10})]
         assert apply_rules(prices, cat_rule, "Heavy Cream", "Dairy")[
             "best"]["vendor"] == "Gfs"
         assert apply_rules(prices, sub_rule, "Heavy Cream", "Dairy")[
