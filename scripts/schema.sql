@@ -83,7 +83,15 @@ CREATE TABLE IF NOT EXISTS orders (
     notes TEXT,
     created_by TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    -- Phase 2 (issue #17): headline basis = cheapest alternative vendor.
+    -- lines_without_alt counts lines excluded for lack of a baseline;
+    -- savings_basis='unknown_legacy' marks orders whose every line lacks one
+    -- (stamped during migration; see migrations/001).
+    savings_vs_alt REAL NOT NULL DEFAULT 0,
+    lines_without_alt INTEGER NOT NULL DEFAULT 0,
+    savings_basis TEXT NOT NULL DEFAULT 'vs_alt'
+        CHECK(savings_basis IN ('vs_alt', 'unknown_legacy'))
 );
 
 -- ===========================================
@@ -104,6 +112,13 @@ CREATE TABLE IF NOT EXISTS order_items (
     savings_vs_avg REAL DEFAULT 0,
     savings_vs_max REAL DEFAULT 0,
     notes TEXT,
+    -- Phase 2 (issue #17): baseline = cheapest alternative vendor's latest
+    -- quote at save time. NULL on legacy rows stamped during migration.
+    alt_vendor_id INTEGER REFERENCES vendors(id),
+    alt_price REAL,
+    savings_basis TEXT NOT NULL DEFAULT 'vs_alt'
+        CHECK(savings_basis IN ('vs_alt', 'unknown_legacy', 'no_alternative')),
+    savings_vs_alt REAL NOT NULL DEFAULT 0,
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
     FOREIGN KEY (item_id) REFERENCES items(id),
     FOREIGN KEY (vendor_id) REFERENCES vendors(id)

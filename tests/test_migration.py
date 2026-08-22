@@ -104,6 +104,8 @@ def test_migrated_db_enforces_new_check_like_fresh(tmp_path):
             "item_id": item_id, "vendor_id": vendor_id,
             "quantity": 1, "unit_price": 10.0,
         }], status="completed")
+        # create_order's return becomes a dict in commit C; tolerate both
+        order_id = result["order_id"] if isinstance(result, dict) else result
 
         with pytest.raises(sqlite3.IntegrityError):
             with db.get_connection() as conn:
@@ -159,7 +161,37 @@ def test_legacy_rows_recomputed_and_stamped(tmp_path):
         order = conn.execute(
             "SELECT savings_vs_alt, lines_without_alt, savings_basis "
             "FROM orders").fetchone()
+        # Mixed order: its vs-alt aggregate is real ($16 over 1 of 2 lines),
+        # so basis stays 'vs_alt' and the count carries the caveat.
         assert order["savings_vs_alt"] == pytest.approx(16.00)
+        assert order["lines_without_alt"] == 1
+        assert order["savings_basis"] == "vs_alt"
+
+
+def test_all_unknown_legacy_order_flips_basis(tmp_path):
+    db = build_old_schema(tmp_path / "unknown.db")
+    item_id = db.add_item("Heavy Cream", "Dairy", "Case")
+    sysco = db.get_or_create_vendor("Sysco")
+
+    with db.get_connection() as conn:
+        conn.execute("INSERT INTO orders (status) VALUES ('completed')")
+        order_id = conn.execute("SELECT MAX(id) FROM orders").fetchone()[0]
+        # chosen at top of market -> nothing recomputable on this order
+        conn.execute(
+            """INSERT INTO order_items
+               (order_id, item_id, vendor_id, quantity, unit, unit_price,
+                total_price, max_price, savings_vs_max)
+               VALUES (?, ?, ?, 1, 'Case', 30.0, 30.0, 30.0, 0.0)""",
+            (order_id, item_id, sysco),
+        )
+
+    db.migrate()
+
+    with db.get_connection() as conn:
+        order = conn.execute(
+            "SELECT savings_vs_alt, lines_without_alt, savings_basis "
+            "FROM orders WHERE id = ?", (order_id,)).fetchone()
+        assert order["savings_vs_alt"] == pytest.approx(0)
         assert order["lines_without_alt"] == 1
         assert order["savings_basis"] == "unknown_legacy"
 

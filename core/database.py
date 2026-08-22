@@ -15,10 +15,16 @@ from .config import Config
 
 # The one definition of "most recent price". date_recorded decides which
 # sheet is newest; created_at/id only break same-day ties (a backfilled
-# old sheet gets a fresh created_at and must NOT win).
+# old sheet gets a fresh created_at and must not win).
 # Issue #9 happened because this ordering existed as two copies; keep it
 # as one. Referenced via f-string in both ranking queries below.
 LATEST_PRICE_RANK_ORDER = "ph.date_recorded DESC, ph.created_at DESC, ph.id DESC"
+
+# Highest schema version implemented by scripts/migrations/. Bump it together
+# with a new NNN_*.sql file there; PRAGMA user_version on real databases
+# records how far each one has come.
+SCHEMA_VERSION = 1
+MIGRATIONS_DIR = Config.BASE_DIR / "scripts" / "migrations"
 
 
 class Database:
@@ -70,6 +76,40 @@ class Database:
         
         with self.get_connection() as conn:
             conn.executescript(schema_sql)
+            # A fresh build is born current; real upgrades go through migrate().
+            conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+    def migrate(self) -> list:
+        """
+        Apply pending schema migrations, oldest first.
+        
+        Each migration is scripts/migrations/NNN_name.sql and bumps
+        PRAGMA user_version to its number when applied, so this is a no-op
+        on an up-to-date database. New databases never enter the loop:
+        init_database() builds them at SCHEMA_VERSION directly.
+        
+        Returns:
+            List of migration step numbers applied (empty when current)
+        """
+        applied = []
+        with self.get_connection() as conn:
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+            while version < SCHEMA_VERSION:
+                step = version + 1
+                path = self._migration_path(step)
+                conn.executescript(path.read_text())
+                conn.execute(f"PRAGMA user_version = {step}")
+                version = step
+                applied.append(step)
+        return applied
+
+    @staticmethod
+    def _migration_path(step: int) -> Path:
+        matches = sorted(MIGRATIONS_DIR.glob(f"{step:03d}_*.sql"))
+        if not matches:
+            raise FileNotFoundError(
+                f"No migration file for schema step {step} in {MIGRATIONS_DIR}")
+        return matches[0]
     
     # ==========================================
     # ITEMS OPERATIONS
