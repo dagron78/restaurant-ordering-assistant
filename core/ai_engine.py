@@ -33,9 +33,11 @@ class GeminiEngine:
         
         genai.configure(api_key=Config.GOOGLE_API_KEY)
         
-        # Use Flash for speed, Pro for complex reasoning
-        self.model_flash = genai.GenerativeModel('gemini-1.5-flash')
-        self.model_pro = genai.GenerativeModel('gemini-1.5-pro')
+        # Use Flash for speed, Pro for complex reasoning.
+        # gemini-1.5-* are retired; default to current generation and
+        # allow override via environment variables.
+        self.model_flash = genai.GenerativeModel(Config.GEMINI_MODEL_FLASH)
+        self.model_pro = genai.GenerativeModel(Config.GEMINI_MODEL_PRO)
         
         # Retry configuration
         self.max_retries = 3
