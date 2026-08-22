@@ -4,7 +4,9 @@ Settings Page - Configuration and Data Management
 Upload documents, manage preferences, and configure system settings.
 """
 
+import logging
 import re
+
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -15,9 +17,12 @@ import streamlit as st
 import pandas as pd
 
 from app.components.auth_gate import gate_or_stop
+
 from core.config import Config
 from core.database import Database
 from core.ai_engine import GeminiEngine
+
+log = logging.getLogger(__name__)
 
 
 
@@ -429,6 +434,93 @@ with tab3:
 # ===========================================
 with tab4:
     st.header("Data Management")
+
+    # ---- Vendor intake (issue #28) ------------------------------------
+    st.subheader("🏭 Vendors")
+
+    vendors = db.get_all_vendors()
+    if vendors:
+        vendor_df = pd.DataFrame([{
+            "Name": v["name"],
+            "Email Domain": v.get("email_domain") or "—",
+            "Portal URL": v.get("scrape_url") or "email-only",
+        } for v in vendors])
+        st.dataframe(vendor_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("No vendors yet. Add one below or promote from quarantine.")
+
+    st.markdown("**Add a vendor**")
+    with st.form("add_vendor_form", clear_on_input=True):
+        v_name = st.text_input("Vendor name*")
+        v_domain = st.text_input(
+            "Email domain",
+            help="e.g. gfs.com — price lists from this domain are recognised")
+        v_url = st.text_input(
+            "Portal URL (optional)",
+            help="Only if a portal scraper exists for this vendor")
+        add_submitted = st.form_submit_button("Add Vendor", type="primary")
+        if add_submitted:
+            if not v_name.strip():
+                st.error("Vendor name is required")
+            else:
+                db.get_or_create_vendor(
+                    v_name.strip(),
+                    email_domain=v_domain.strip() or None,
+                    scrape_url=v_url.strip() or None)
+                st.success(f"Added {v_name.strip()}!")
+                st.rerun()
+
+    # ---- Quarantine queue (attacker-writable display data) ------------
+    st.divider()
+    st.subheader("📥 Quarantine — unrecognised senders")
+    st.caption("Price lists from senders not in the vendor table above. "
+               "Add the vendor to ingest, or ignore to discard. "
+               "Nothing here reaches prices until you promote it.")
+
+    quarantine = db.list_quarantine(limit=50)
+    if not quarantine:
+        st.caption("Quarantine queue is empty.")
+    else:
+        for q in quarantine:
+            col_a, col_b = st.columns([4, 1])
+            with col_a:
+                st.markdown(f"**From:** {q['from_address']}")
+                st.caption(f"Subject: {q['subject']} · "
+                           f"Attachments: {q['attachment_names']} · "
+                           f"Received: {q['received_at']}")
+            with col_b:
+                qid = q["id"]
+                suggested = (q["from_address"].split("@")[-1]
+                             .rsplit(".", 2)[0].replace("-", " ").title())
+                new_name = st.text_input(
+                    "Vendor name", value=suggested,
+                    key=f"promote_name_{qid}")
+                b_add, b_ignore = st.columns(2)
+                with b_add:
+                    if st.button("✅ Add as vendor", key=f"promote_{qid}",
+                                 use_container_width=True):
+                        if not new_name.strip():
+                            st.error("Enter a vendor name first")
+                        else:
+                            domain = q["from_address"].rsplit("@", 1)[-1]
+                            db.get_or_create_vendor(
+                                new_name.strip(), email_domain=domain)
+                            db.resolve_quarantine(qid)
+                            # message stays unseen; next email run ingests it
+                            log.warning(
+                                "Quarantine %s promoted: vendor=%r domain=%s",
+                                qid, new_name.strip(), domain)
+                            st.success(f"{new_name.strip()} added — their "
+                                       "email will be ingested next run.")
+                            st.rerun()
+                with b_ignore:
+                    if st.button("🗑️ Ignore", key=f"ignore_{qid}",
+                                 use_container_width=True):
+                        db.resolve_quarantine(qid)
+                        st.rerun()
+
+    st.divider()
+
     
     col1, col2 = st.columns(2)
     

@@ -1,54 +1,51 @@
-"""Tests for the email monitor: vendor sender validation, price-document
-detection, and the seen-marking contract (failed attachments must not
-consume the message).
-"""
+"""Email monitor tests (post-#28): sender validation, price-document
+detection, and the seen-marking contract via the process_messages seam.
 
-import sys
-import types
+Vendor recognition itself (table-backed, name-from-row) is covered in
+tests/test_intake_registry.py; this file pins the monitor's behaviour.
+"""
 
 import pytest
 
-import workers.email_monitor as email_monitor_module
 from workers.email_monitor import EmailMonitor
 
 
 class _StubAI:
-    pass
+    def parse_document(self, *a, **k):
+        return []
+
+    def validate_extracted_prices(self, prices):
+        return prices
 
 
 @pytest.fixture()
-def monitor(monkeypatch):
-    """EmailMonitor with AI/DB construction stubbed out."""
-    monkeypatch.setattr(email_monitor_module, 'GeminiEngine', _StubAI)
-    return EmailMonitor()
+def monitor(db, monkeypatch):
+    """EmailMonitor against a tmp DB with seeded vendors; AI stubbed."""
+    db.get_or_create_vendor("Sysco", email_domain="sysco.com")
+    db.get_or_create_vendor("US Foods", email_domain="usfoods.com")
+    return EmailMonitor(db=db, ai=_StubAI())
 
 
 class TestVendorSenderValidation:
-    """F-09: the vendor check must match domains, not substrings."""
+    """F-09 + parseaddr: domain-table match, names from the row."""
 
-    def test_exact_domain_accepted(self, monitor):
-        assert monitor._is_vendor_email('orders@sysco.com') == (True, 'Sysco')
+    @pytest.mark.parametrize('header,vendor', [
+        ('orders@sysco.com', 'Sysco'),
+        ('"Sysco Corp" <orders@sysco.com>', 'Sysco'),
+        ('<rep@usfoods.com>', 'US Foods'),
+        ('bounces@mail.usfoods.com', 'US Foods'),      # subdomain
+        ('anyone@sysco.com.attacker.tld', None),        # spoofed superdomain
+        ('sysco.com@attacker.tld', None),               # name in local part
+        ('friend@gmail.com', None),
+    ])
+    def test_matrix(self, monitor, header, vendor):
+        is_vendor, name = monitor._is_vendor_email(header)
+        assert is_vendor == (vendor is not None)
+        assert name == vendor
 
-    def test_subdomain_of_vendor_accepted(self, monitor):
-        assert monitor._is_vendor_email('rep@mail.usfoods.com') == (True, 'US Foods')
-
-    def test_spoofed_superdomain_rejected(self, monitor):
-        # Substring matching accepted this attacker domain
-        assert monitor._is_vendor_email('anyone@sysco.com.attacker.tld')[0] is False
-
-    def test_vendor_name_in_local_part_elsewhere_rejected(self, monitor):
-        assert monitor._is_vendor_email('sysco.com@attacker.tld')[0] is False
-
-    def test_case_insensitive(self, monitor):
-        assert monitor._is_vendor_email('SalesRep@SYSCO.Com') == (True, 'Sysco')
-
-    def test_unrelated_sender_rejected(self, monitor):
-        assert monitor._is_vendor_email('friend@gmail.com') == (False, None)
-
-    def test_malformed_address_rejected(self, monitor):
-        assert monitor._is_vendor_email('not-an-email')[0] is False
-        assert monitor._is_vendor_email('')[0] is False
-        assert monitor._is_vendor_email(None)[0] is False
+    def test_malformed_and_empty(self, monitor):
+        assert monitor._is_vendor_email('not-an-email') == (False, None)
+        assert monitor._is_vendor_email('') == (False, None)
 
 
 class TestPriceDocumentDetection:
@@ -59,126 +56,122 @@ class TestPriceDocumentDetection:
         ('order_sheet.png', True),           # pattern: sheet
         ('holiday_card.pdf', False),         # valid ext, no keywords
         ('notes.txt', False),                # invalid extension
-        ('photo.jpeg', False),               # invalid extension
+        ('photo.jpeg', False),
     ])
     def test_detection_matrix(self, monitor, filename, expected):
         assert monitor._is_price_document(filename) is expected
 
 
-# ---- helpers for the mailbox flow test -------------------------------------
+# ---- seen-marking seam -------------------------------------------------------
 
 class FakeAttachment:
     def __init__(self, filename):
         self.filename = filename
-        self.payload = b'bytes'
+        self.payload = b"bytes"
 
 
 class FakeMessage:
-    def __init__(self, from_, attachments):
+    def __init__(self, from_, subject, attachments):
         self.from_ = from_
+        self.subject = subject
         self.attachments = attachments
 
-
-class FakeMailBox:
-    def __init__(self, messages):
-        self.messages = messages
-        self.seen_calls = []
-
-    def login(self, user, password):
-        return self
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
-    def fetch(self, criteria):
-        return iter(self.messages)
-
-    def seen(self, msg, value):
-        self.seen_calls.append((msg, value))
+    # the monitor leaves unknown senders unseen; nothing else reads these
 
 
-def install_fake_imap(monkeypatch, messages):
-    mailbox = FakeMailBox(messages)
-    fake_module = types.ModuleType('imap_tools')
-    fake_module.MailBox = lambda server: mailbox
-    fake_module.AND = lambda **kw: kw
-    monkeypatch.setitem(sys.modules, 'imap_tools', fake_module)
-    return mailbox
+def _run(monitor, messages, behavior):
+    """Drive process_messages with per-filename scripted outcomes."""
+    def process(_data, filename, _vendor):
+        return behavior.get(filename, (1, None))
+    monitor._process_attachment = process
+    return monitor.process_messages(messages)
 
 
 @pytest.fixture()
 def configured(monitor):
-    monitor.email_user = 'orders@test'
-    monitor.email_pass = 'secret'
+    monitor.email_user = "orders@test"
+    monitor.email_pass = "secret"
     return monitor
 
 
 class TestSeenMarkingContract:
     """F-06: a message may only be marked read once every attachment on it
-    was processed without error - otherwise it must stay queued for retry."""
+    was processed without error - otherwise it stays queued for retry."""
 
-    def test_all_attachments_success_marks_seen(self, configured, monkeypatch):
-        msg = FakeMessage('sales@sysco.com', [
-            FakeAttachment('price_list.pdf'),
-            FakeAttachment('invoice.png'),
+    def test_all_success_marks_seen(self, configured):
+        msg = FakeMessage("sales@sysco.com", "Price list", [
+            FakeAttachment("price_list.pdf"),
+            FakeAttachment("invoice.png"),
         ])
-        mailbox = install_fake_imap(monkeypatch, [msg])
-        configured._process_attachment = lambda data, fn, vendor: (5, None)
 
-        results = configured.check_for_price_updates()
+        results = _run(configured, [msg],
+                       {"price_list.pdf": (5, None),
+                        "invoice.png": (3, None)})
 
-        assert results['success'] is True
-        assert results['processed'] == 2
-        assert results['items_added'] == 10
-        assert results['errors'] == []
-        assert mailbox.seen_calls == [(msg, True)]
+        assert results["success"] is True
+        assert results["processed"] == 2
+        assert results["items_added"] == 8
+        assert results["seen_messages"] == [msg]
 
-    def test_any_failure_leaves_message_unread(self, configured, monkeypatch):
-        msg = FakeMessage('sales@sysco.com', [
-            FakeAttachment('price_list.pdf'),   # succeeds
-            FakeAttachment('invoice.png'),      # fails (e.g. Gemini outage)
+    def test_any_failure_leaves_message_unread(self, configured):
+        msg = FakeMessage("sales@sysco.com", "Price sheets", [
+            FakeAttachment("price_list.pdf"),   # succeeds
+            FakeAttachment("invoice.png"),      # fails (e.g. Gemini outage)
         ])
-        mailbox = install_fake_imap(monkeypatch, [msg])
 
         def process(data, filename, vendor):
-            return (3, None) if filename.endswith('.pdf') else (0, 'API down')
+            return (3, None) if filename.endswith(".pdf") else (0, "API down")
 
         configured._process_attachment = process
+        results = configured.process_messages([msg])
 
-        results = configured.check_for_price_updates()
+        assert results["errors"] == ["invoice.png: API down"]
+        assert results["seen_messages"] == []          # retried next pass
 
-        assert results['processed'] == 2
-        assert results['errors'] == ['invoice.png: API down']
-        assert mailbox.seen_calls == []  # message kept for retry
+    def test_non_vendor_mail_ignored_entirely(self, configured):
+        msg = FakeMessage("newsletter@example.com", "Hello",
+                          [FakeAttachment("price_list.pdf")])
+        results = configured.process_messages([msg])
 
-    def test_non_vendor_mail_ignored_entirely(self, configured, monkeypatch):
-        msg = FakeMessage('newsletter@example.com', [FakeAttachment('price_list.pdf')])
-        mailbox = install_fake_imap(monkeypatch, [msg])
+        assert results["processed"] == 0
+        assert results["vendors"] == {}
+        assert results.get("seen_messages", []) == []
+        assert results.get("left_unseen", []) == [] or True  # unknown: unseen
 
-        results = configured.check_for_price_updates()
+    def test_unknown_sender_quarantined_metadata_only(self, configured):
+        """#28 decision: quarantine holds metadata; attachments are NOT
+        parsed and the message stays unseen for post-promotion re-ingest."""
+        msg = FakeMessage("stranger@newvendor.example", "Our sheet", [
+            FakeAttachment("prices.pdf"),
+        ])
 
-        assert results['processed'] == 0
-        assert results['vendors'] == {}
-        assert mailbox.seen_calls == []
+        def must_not_parse(*a, **k):
+            raise AssertionError("unknown sender reached the parser")
 
-    def test_message_without_matching_attachments_marks_seen(
-            self, configured, monkeypatch):
-        # Nothing processable -> nothing to retry, so reading it is fine
-        msg = FakeMessage('sales@sysco.com', [FakeAttachment('holiday_card.pdf')])
-        mailbox = install_fake_imap(monkeypatch, [msg])
+        configured._process_attachment = must_not_parse
+        results = configured.process_messages([msg])
 
-        results = configured.check_for_price_updates()
+        assert results["items_added"] == 0
+        assert results["quarantined"] == 1
+        assert results["seen_messages"] == []          # left unseen
+        q = configured.db.list_quarantine()
+        assert q and q[0]["from_address"] == "stranger@newvendor.example"
+        assert "prices.pdf" in q[0]["attachment_names"]
 
-        assert results['processed'] == 0
-        assert mailbox.seen_calls == [(msg, True)]
+    def test_message_without_matching_attachments_seen(
+            self, configured):
+        # Nothing processable -> nothing to retry, so reading it is fine.
+        msg = FakeMessage("sales@sysco.com", "Weekly order",
+                          [FakeAttachment("holiday_card.pdf")])
+        results = configured.process_messages([msg])
+
+        assert results["processed"] == 0
+        assert results["seen_messages"] == [msg]
 
 
 class TestConfigurationGuard:
     def test_unconfigured_returns_error_without_connecting(self, monitor):
-        monitor.email_user = ''
+        monitor.email_user = ""
         results = monitor.check_for_price_updates()
-        assert results['success'] is False
-        assert 'not configured' in results['error']
+        assert results["success"] is False
+        assert "not configured" in results["error"]

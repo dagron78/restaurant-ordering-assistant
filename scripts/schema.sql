@@ -154,6 +154,22 @@ CREATE TABLE IF NOT EXISTS savings_summary (
 );
 
 -- ===========================================
+-- QUARANTINE TABLE (issue #28)
+-- Metadata ONLY for email from senders not present in `vendors`.
+-- Never parsed; rows are promoted by a human adding the vendor, at which
+-- point the still-unseen mailbox message re-ingests through the normal
+-- intake path.
+-- ===========================================
+CREATE TABLE IF NOT EXISTS quarantine (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    received_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    from_address TEXT NOT NULL,
+    subject TEXT,
+    attachment_names TEXT,
+    UNIQUE(from_address, subject)
+);
+
+-- ===========================================
 -- PROCESSING LOG TABLE
 -- Track document processing history
 -- ===========================================

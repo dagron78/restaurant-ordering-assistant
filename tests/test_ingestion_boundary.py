@@ -10,7 +10,6 @@ import sqlite3
 import pytest
 
 from core.config import Config
-import core.ai_engine as ai_engine_module
 from core.ai_engine import GeminiEngine
 
 
@@ -34,13 +33,15 @@ def _png(tmp_path):
 
 
 @pytest.fixture()
-def monitor(monkeypatch):
-    monkeypatch.setattr(ai_engine_module.__name__ + '.GeminiEngine',
-                        _StubAI, raising=True)
-    # EmailMonitor constructs GeminiEngine; patch the name it resolves
+def monitor(tmp_path):
+    """EmailMonitor against a properly initialised tmp DB."""
+    from core.database import Database
     import workers.email_monitor as em
-    monkeypatch.setattr(em, 'GeminiEngine', _StubAI)
-    return em.EmailMonitor()
+    db = Database(db_path=tmp_path / "intake.db")
+    db.init_database()
+    db.get_or_create_vendor("Sysco", email_domain="sysco.com")
+    db.get_or_create_vendor("US Foods", email_domain="usfoods.com")
+    return em.EmailMonitor(db=db, ai=_StubAI())
 
 
 class TestParseDocumentRowResilience:
