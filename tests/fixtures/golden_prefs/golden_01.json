@@ -1,0 +1,21 @@
+{
+  "prose": "Prefer Sysco for all produce items unless US Foods is 15% cheaper.\nAlways buy dairy products from US Foods.",
+  "response": "```json\n[\n  {\n    \"rule_type\": \"vendor_preference\",\n    \"item_pattern\": \"produce items\",\n    \"condition\": {\n      \"prefer_vendor\": \"Sysco\",\n      \"switch_if_cheaper_pct\": 15\n    },\n    \"action\": \"Prefer Sysco for produce items unless US Foods is 15% cheaper\"\n  },\n  {\n    \"rule_type\": \"vendor_preference\",\n    \"item_pattern\": \"dairy products\",\n    \"condition\": {\n      \"prefer_vendor\": \"US Foods\"\n    },\n    \"action\": \"Always buy dairy products from US Foods\"\n  }\n]\n```",
+  "expect": [
+    {
+      "rule_type": "vendor_preference",
+      "item_pattern": "produce items",
+      "condition": {
+        "prefer_vendor": "Sysco",
+        "switch_if_cheaper_pct": 15
+      }
+    },
+    {
+      "rule_type": "vendor_preference",
+      "item_pattern": "dairy products",
+      "condition": {
+        "prefer_vendor": "US Foods"
+      }
+    }
+  ]
+}

@@ -6,6 +6,8 @@ stub to prove CACHE behaviour only — parser correctness is covered
 separately against golden fixtures captured from real Gemini output.
 """
 
+import json
+
 import pytest
 
 from core.recommendation import RecommendationEngine
@@ -116,12 +118,13 @@ class TestGoldenParserContract:
             pytest.skip("No golden fixtures captured yet - run "
                         "scripts/capture_golden_preferences.py with an API key")
         from core.config import Config
+        from core.ai_engine import GeminiEngine
         monkeypatch.setattr(Config, 'GOOGLE_API_KEY', 'test-key', raising=True)
-        engine = RecommendationEngine.__new__(RecommendationEngine)  # skip __init__
+        engine = GeminiEngine()   # constructor is offline-safe (no network)
         engine.max_retries, engine.retry_delay = 1, 0
 
         for f in files:
-            golden = __import__('json').loads(f.read_text())
+            golden = json.loads(f.read_text())
             monkeypatch.setattr(
                 engine, '_call_with_retry',
                 lambda model, content, generation_config=None, _r=golden["response"]:
@@ -130,8 +133,11 @@ class TestGoldenParserContract:
             for expected in golden["expect"]:
                 assert any(
                     r.get('rule_type') == expected['rule_type']
-                    and r.get('condition_json') == expected['condition_json']
-                    for r in rules), f"{f.name}: {expected} not parsed from real output"
+                    and (r.get('item_pattern') or '*').lower()
+                        == expected['item_pattern'].lower()
+                    and r.get('condition') == expected['condition']
+                    for r in rules), \
+                    f"{f.name}: expected {expected} not parsed from real output"
 
     @pytest.mark.live
     def test_live_capture_refreshes_goldens(self, monkeypatch):

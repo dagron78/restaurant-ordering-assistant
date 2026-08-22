@@ -1,0 +1,14 @@
+{
+  "prose": "Buy chicken breast from US Foods unless Sysco is at least 5% cheaper per pound.",
+  "response": "```json\n[\n  {\n    \"rule_type\": \"vendor_preference\",\n    \"item_pattern\": \"chicken breast\",\n    \"condition\": {\n      \"prefer_vendor\": \"US Foods\",\n      \"switch_if_cheaper_pct\": 5\n    },\n    \"action\": \"Prefer US Foods for chicken breast unless Sysco is 5%+ cheaper\"\n  }\n]\n```",
+  "expect": [
+    {
+      "rule_type": "vendor_preference",
+      "item_pattern": "chicken breast",
+      "condition": {
+        "prefer_vendor": "US Foods",
+        "switch_if_cheaper_pct": 5
+      }
+    }
+  ]
+}
