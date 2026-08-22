@@ -5,9 +5,10 @@ requires-python = ">=3.11"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q -m 'not slow_ui'"
 markers = [
     "live: requires a valid GOOGLE_API_KEY and network; skipped by default",
+    "slow_ui: full UI integration test; skipped in fast CI",
 ]
 filterwarnings = [
     # The google.generativeai SDK is deprecated upstream; migrating to
