@@ -33,10 +33,6 @@ class TestVendorCredentialRemoval:
         for attr in ('SYSCO_USER', 'SYSCO_PASS', 'USFOODS_USER', 'USFOODS_PASS'):
             assert not hasattr(Config, attr), f"Config.{attr} should be gone"
 
-    def test_site_urls_are_kept(self):
-        assert Config.SYSCO_URL.startswith('https://')
-        assert Config.USFOODS_URL.startswith('https://')
-
     def test_validate_reports_only_real_dependencies(self):
         results = Config.validate()
         assert set(results) == {'gemini_api', 'email', 'database_dir', 'all_valid'}

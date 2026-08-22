@@ -106,9 +106,15 @@ with col6:
 st.divider()
 
 # Group recommendations by category
+# Search/filter (#30 B)
+search = st.text_input("🔍 Search items", placeholder="Filter by name...",
+                        label_visibility="collapsed")
+
 categories = {}
 for rec in recommendations:
     cat = rec.get('category') or 'Uncategorized'
+    if search and search.lower() not in rec.get('item','').lower():
+        continue
     if cat not in categories:
         categories[cat] = []
     categories[cat].append(rec)
@@ -223,36 +229,39 @@ with st.form("order_form"):
                 elif "🔴" in item['trend_icon']:
                     trend_class = "trend-spike"
                 
-                with st.container():
+                with st.container(border=True):
                     price_display = f"${item['price']:.2f}" if item['price'] else "N/A"
+                    is_deal = "🟢" in item['trend_icon']
+                    dot_label = "Best price" if is_deal else ""
                     card_html = f'''
-                    <div class="item-card">
-                        <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
-                            <div style="font-weight:700; font-size:1.1em;">{item['item']}</div>
-                            <div class="{trend_class} trend-pill">{item['trend_icon']}</div>
-                        </div>
-                        <div style="display:flex; justify-content:space-between; color:#6b7280; font-size:0.9em; margin-bottom:12px;">
-                            <div>🏭 {item['recommended_vendor']}</div>
-                            <div>💰 {price_display}/{item['unit']}</div>
-                        </div>
+                    <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                        <div style="font-weight:700; font-size:1.1em;">{item['item']}</div>
+                        <div class="{trend_class} trend-pill" title="{dot_label}">{item['trend_icon']}{'<small> Best price</small>' if is_deal else ''}</div>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; color:#6b7280; font-size:0.9em; margin-bottom:6px;">
+                        <div>🏭 {item['recommended_vendor']}</div>
+                        <div>💰 {price_display}/{item['unit']}</div>
                     </div>
                     '''
                     st.markdown(card_html, unsafe_allow_html=True)
-                    
-                    c1, c2 = st.columns([1, 2])
-                    with c1:
-                        qty = st.number_input(
-                            "Qty",
-                            min_value=0,
-                            value=st.session_state.order_quantities.get(item['item'], 0),
-                            key=f"qty_mobile_{FORM_V}_{item['item']}",
-                            label_visibility="collapsed"
-                        )
-                    with c2:
-                        if item['alert']:
-                            st.caption(f"⚠️ {item['alert']}")
+
+                    # Qty INSIDE the card so it's visually unambiguous (#30 B)
+                    qty = st.number_input(
+                        f"Qty — {item['item']}",
+                        min_value=0,
+                        value=st.session_state.order_quantities.get(item['item'], 0),
+                        key=f"qty_mobile_{FORM_V}_{item['item']}",
+                    )
+
+                    if item['alert']:
+                        if 'Price down' in str(item['alert']):
+                            st.success(f"🟢 {item['alert']}")
+                        elif 'Price up' in str(item['alert']):
+                            st.warning(f"🔴 {item['alert']}")
                         else:
-                            st.caption(item['reason'])
+                            st.info(f"ℹ️ {item['alert']}")
+                    else:
+                        st.caption(item['reason'])
                     
                     # Sync and track with savings data
                     st.session_state.order_quantities[item['item']] = qty
@@ -274,6 +283,24 @@ with st.form("order_form"):
                         order_items[-1]['alt_price'] = _alt_c['price'] if _alt_c else None
                         order_items[-1]['alt_vendor'] = _alt_c['vendor'] if _alt_c else None
         
+    # Sticky running total (#30 B): visible while scrolling, not just at the bottom
+    if order_items:
+        line_count = len(order_items)
+        order_total = sum(it['total'] for it in order_items)
+        net_vs_alt = sum(
+            it['qty'] * (it['alt_price'] - it['unit_price'])
+            for it in order_items if it.get('alt_price') is not None
+        )
+        excluded = sum(1 for it in order_items if it.get('alt_price') is None)
+        cols_st = st.columns(3)
+        with cols_st[0]:
+            st.metric("Lines", line_count)
+        with cols_st[1]:
+            st.metric("Order Total", f"${order_total:,.2f}")
+        with cols_st[2]:
+            note = f" ({excluded} no comparison)" if excluded else ""
+            st.metric("Net vs Alternatives", f"${net_vs_alt:+,.2f}", help=note)
+
     st.divider()
 
     # Submit buttons

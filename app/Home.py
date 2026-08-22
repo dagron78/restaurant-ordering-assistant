@@ -99,6 +99,29 @@ def home_dashboard():
             recent_updates = sum(1 for lg in logs if lg.get('status') == 'success')
             st.metric("Successful Updates", recent_updates)
 
+        # Intake status per vendor (#28 / #30 D)
+        st.subheader("📡 Vendor Intake")
+        for vendor in vendors:
+            v_logs = [lg for lg in logs
+                      if lg.get('source_type') == 'scrape'
+                      and lg.get('source_identifier') == vendor['name']
+                      and lg.get('status') == 'success']
+            if v_logs:
+                latest = v_logs[0]
+                when = (latest.get('processed_at') or '')[:16]
+                n = latest.get('items_processed', 0)
+                st.caption(f"✅ {vendor['name']}: {n} prices updated ({when})")
+            else:
+                st.caption(f"⚪ {vendor['name']}: no portal data yet "
+                           "(email intake only)")
+
+        q_count = len(db.list_quarantine(limit=100))
+        if q_count:
+            st.warning(
+                f"📥 {q_count} message(s) from unrecognised senders are "
+                "waiting in Settings → Data → Quarantine.",
+                icon="📥")
+
     except Exception as e:
         st.error(f"Error loading stats: {e}")
         st.info("Run the database initialization script first: "
@@ -120,5 +143,6 @@ pages = [
     st.Page("views/1_📋_Order_Guide.py", title="Order Guide", icon="📋"),
     st.Page("views/2_📈_Trends.py", title="Trends", icon="📈"),
     st.Page("views/3_⚙️_Settings.py", title="Settings", icon="⚙️"),
+    st.Page("views/4_📖_How_This_Works.py", title="How This Works", icon="📖"),
 ]
 st.navigation(pages).run()
