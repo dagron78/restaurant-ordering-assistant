@@ -159,24 +159,40 @@ class GeminiEngine:
         
         try:
             items = json.loads(clean_json)
-            
-            # Validate and clean items
-            validated_items = []
-            for item in items:
-                if all(k in item for k in ['item_name', 'price']):
-                    validated_items.append({
-                        'item_name': str(item['item_name']).strip(),
-                        'price': float(item['price']),
-                        'unit': item.get('unit', 'Each'),
-                        'vendor': item.get('vendor', vendor_hint or 'Unknown')
-                    })
-            
-            return validated_items
-            
         except json.JSONDecodeError as e:
             print(f"JSON parse error: {e}")
             print(f"Raw response: {clean_json[:500]}")
             return []
+        
+        if not isinstance(items, list):
+            print("Model response was not a JSON array; discarding")
+            return []
+        
+        # Per-row coercion: one malformed line ("N/A", "$24.50") must cost
+        # only its own row, not the rest of the document.
+        validated_items = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            try:
+                name = str(item['item_name']).strip()
+                price = float(item['price'])
+            except (KeyError, TypeError, ValueError) as e:
+                print(f"Skipping malformed extracted row ({e}): {str(item)[:120]}")
+                continue
+            
+            validated_items.append({
+                'item_name': name,
+                'price': price,
+                'unit': item.get('unit', 'Each'),
+                'vendor': item.get('vendor', vendor_hint or 'Unknown')
+            })
+        
+        dropped = len(items) - len(validated_items)
+        if dropped:
+            print(f"Dropped {dropped} of {len(items)} rows during extraction cleanup")
+        
+        return validated_items
     
     def parse_preferences(self, preferences_text: str) -> List[Dict]:
         """

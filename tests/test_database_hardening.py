@@ -27,6 +27,9 @@ class TestBatchTransaction:
     and a bad row must not abort the rest of the batch."""
 
     def test_mixed_rows_partial_success(self, db):
+        # Items pre-created: ingestion must not expand the catalog (C-3)
+        db.add_item('Flour', 'Dry Goods', 'Bag')
+        db.add_item('Milk', 'Dairy', 'Gallon')
         prices = [
             {'item_name': 'Flour', 'vendor_name': 'Sysco', 'price': 18.0, 'unit': 'Bag'},
             {'item_name': 'Bad Row'},                      # no price -> skipped
@@ -38,23 +41,39 @@ class TestBatchTransaction:
         assert len(db.get_latest_prices('Flour')) == 1
         assert len(db.get_latest_prices('Milk')) == 1
 
+    def test_unknown_items_not_created_by_default(self, db):
+        """Ingestion boundary: model output must not invent catalog items."""
+        added = db.add_prices_batch([
+            {'item_name': 'Hallucinated Truffle Oil', 'vendor_name': 'Sysco', 'price': 9.0},
+        ], source='email')
+
+        assert added == 0
+        assert db.get_item(name='Hallucinated Truffle Oil') is None
+
+    def test_create_missing_items_opt_in(self, db):
+        added = db.add_prices_batch([
+            {'item_name': 'Demo Item', 'vendor_name': 'Sysco', 'price': 5.0},
+        ], create_missing_items=True)
+
+        assert added == 1
+        assert db.get_item(name='Demo Item') is not None
+
     def test_failed_row_leaves_no_orphan_item(self, db):
         # A row failing after item creation must not persist the item
         db.add_prices_batch([
             {'item_name': 'Ghost Item', 'vendor_name': '', 'price': 1.0},
-        ])
+        ], create_missing_items=True)
         assert db.get_item(name='Ghost Item') is None
 
     def test_all_rows_share_one_commit_semantics(self, db):
         """Everything added is visible together; nothing half-applied."""
+        db.add_item('Anchor', category=None)
         prices = [
             {'item_name': f'Item{i}', 'vendor_name': 'Sysco', 'price': float(i)}
-            for i in range(25)
-        ]
-        assert db.add_prices_batch(prices) == 25
-        with db.get_connection() as conn:
-            n = conn.execute('SELECT COUNT(*) AS n FROM price_history').fetchone()
-        assert n['n'] == 25
+            for i in range(1, 25)
+        ] + [{'item_name': 'Anchor', 'vendor_name': 'Sysco', 'price': 1.0}]
+        
+        assert db.add_prices_batch(prices, create_missing_items=True) == 25
 
 
 class TestSingleQueryItemPrices:

@@ -7,6 +7,7 @@ update the database with new prices.
 """
 
 import sys
+from email.utils import parseaddr
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Tuple
@@ -54,12 +55,15 @@ class EmailMonitor:
         Check if email is from a known vendor.
         
         Args:
-            from_address: Email sender address
+            from_address: Email sender address (may be a full From header,
+                e.g. '"Sysco Corp" <orders@sysco.com>')
             
         Returns:
             Tuple of (is_vendor, vendor_name)
         """
-        address = (from_address or '').lower()
+        # Parse with the stdlib: display names, angle brackets and other
+        # header edge cases are more than an rsplit/rstrip can cover.
+        address = (parseaddr(from_address or '')[1] or '').lower()
         if '@' not in address:
             return False, None
         

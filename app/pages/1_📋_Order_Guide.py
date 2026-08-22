@@ -302,6 +302,7 @@ if (generate_summary or save_order) and order_items:
     with col2:
         st.metric("💰 Total Savings", f"${savings_info['total_savings_vs_max']:.2f}",
                   delta=f"{savings_info['savings_percentage']:.1f}%")
+        st.caption("vs most expensive vendor - the optimistic baseline")
     with col3:
         st.metric("Would Have Paid", f"${potential_max:.2f}",
                   delta=f"-${savings_info['total_savings_vs_max']:.2f}",

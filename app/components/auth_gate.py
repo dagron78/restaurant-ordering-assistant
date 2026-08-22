@@ -5,14 +5,17 @@ Single shared-password model, sized for a homelab/restaurant deployment:
 set APP_PASSWORD in .env and every page requires it before rendering.
 Without APP_PASSWORD the app stays open but warns loudly on every page.
 
+Known, documented limitations (see README Security section): the shared
+password has unlimited attempts with no lockout or rate limiting, and
+vendor-email trust is domain-based only - no DKIM/SPF verification.
+
 Import note: lives under app/components because it needs streamlit;
 core/ must stay UI-free.
 """
 
-import os
-
 import streamlit as st
 
+from core.config import Config
 from core.security import password_matches
 
 
@@ -24,7 +27,10 @@ def require_login() -> bool:
     Returns True once access is allowed (and renders the login form,
     stopping execution, until the correct password is submitted).
     """
-    expected = os.getenv('APP_PASSWORD', '')
+    # Read through Config, not os.getenv: load_dotenv() runs at core.config
+    # import time, and this module must not depend on some other import
+    # having pulled it in first - empty would be the fail-open branch.
+    expected = Config.APP_PASSWORD
     
     if not expected:
         st.warning(

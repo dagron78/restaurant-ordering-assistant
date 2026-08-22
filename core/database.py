@@ -262,12 +262,19 @@ class Database:
             )
     
     def _resolve_item_id(self, conn: sqlite3.Connection, item_name: str,
-                         unit: str = None) -> int:
-        """Get or create an item using an existing connection."""
+                         unit: str = None, create_missing: bool = True) -> int:
+        """Resolve an item to its id using an existing connection.
+        
+        Raises:
+            ValueError: If the item is unknown and create_missing is False
+        """
         cursor = conn.execute("SELECT id FROM items WHERE name = ?", (item_name,))
         row = cursor.fetchone()
         if row:
             return row['id']
+        
+        if not create_missing:
+            raise ValueError(f"unknown item {item_name!r}")
         
         cursor = conn.execute(
             "INSERT INTO items (name, default_unit) VALUES (?, ?)",
@@ -291,7 +298,8 @@ class Database:
         )
         return cursor.lastrowid
     
-    def add_prices_batch(self, prices: List[Dict], source: str = 'manual') -> int:
+    def add_prices_batch(self, prices: List[Dict], source: str = 'manual',
+                         create_missing_items: bool = False) -> int:
         """
         Add multiple prices in a single transaction.
         
@@ -299,10 +307,17 @@ class Database:
         fails validation is skipped without aborting the others; failures
         are logged rather than silently swallowed.
         
+        By default rows naming an item that doesn't exist are SKIPPED -
+        this is the AI-ingestion boundary, and auto-creating items from
+        model output let a garbled PDF expand the catalog with
+        hallucinated product names. Pass create_missing_items=True only
+        for trusted sources (e.g. demo data).
+        
         Args:
             prices: List of dicts with keys: item_name, vendor_name, price
-                (optional: unit, confidence)
+                (optional: unit, confidence, date_recorded)
             source: Source type for all prices
+            create_missing_items: Whether to create items that don't exist
             
         Returns:
             Number of prices added
@@ -310,8 +325,6 @@ class Database:
         added = 0
         
         with self.get_connection() as conn:
-            # Enforce FKs on this connection too - get_connection does it,
-            # but keep the batch self-evidently safe.
             for price_data in prices:
                 item_name = price_data.get('item_name')
                 
@@ -324,13 +337,18 @@ class Database:
                                                  price_data.get('vendor', 'Unknown'))
                     unit = price_data.get('unit') or 'Each'
                     confidence = float(price_data.get('confidence', 0.9))
+                    date_recorded = price_data.get('date_recorded')
                     
                     conn.execute("SAVEPOINT row_sp")
                     try:
-                        item_id = self._resolve_item_id(conn, str(item_name).strip(), unit)
+                        item_id = self._resolve_item_id(
+                            conn, str(item_name).strip(), unit,
+                            create_missing=create_missing_items
+                        )
                         vendor_id = self._get_or_create_vendor(conn, vendor_name)
                         self._insert_price(
-                            conn, item_id, vendor_id, price, unit, source, confidence
+                            conn, item_id, vendor_id, price, unit, source,
+                            confidence, date_recorded=date_recorded
                         )
                     except Exception:
                         conn.execute("ROLLBACK TO row_sp")
@@ -404,7 +422,9 @@ class Database:
             """, (item_name, cutoff_date))
             
             row = cursor.fetchone()
-            return row['avg_price'] if row and row['avg_price'] else None
+            if row and row['avg_price'] is not None:
+                return float(row['avg_price'])
+            return None
     
     def get_price_history(self, item_name: str, days: int = 180) -> List[Dict]:
         """
