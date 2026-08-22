@@ -36,6 +36,8 @@ class TestLatestPricesOneRowPerVendor:
         assert best["vendor"] == "US Foods"
 
     def test_old_history_still_excluded(self, db):
+        """The date axis: a NEWLY INSERTED but genuinely OLD price must not
+        win. (Insert order deliberately reversed - newest first.)"""
         db.add_item("Heavy Cream", category="Dairy")
         sysco = db.get_or_create_vendor("Sysco")
 
@@ -43,19 +45,53 @@ class TestLatestPricesOneRowPerVendor:
             conn.execute(
                 """INSERT INTO price_history
                    (item_id, vendor_id, price, unit, date_recorded, source)
-                   VALUES (?, ?, 10.0, 'Case', '2020-01-01', 'manual')""",
+                   VALUES (?, ?, 20.0, 'Case', '2026-08-01', 'manual')""",
                 (db.get_item(name="Heavy Cream")["id"], sysco),
             )
+            # Backfilled afterwards, but dated 2020 - must lose
             conn.execute(
                 """INSERT INTO price_history
                    (item_id, vendor_id, price, unit, date_recorded, source)
-                   VALUES (?, ?, 20.0, 'Case', '2026-08-01', 'manual')""",
+                   VALUES (?, ?, 10.0, 'Case', '2020-01-01', 'manual')""",
                 (db.get_item(name="Heavy Cream")["id"], sysco),
             )
 
         prices = db.get_latest_prices("Heavy Cream")
         assert len(prices) == 1
         assert prices[0]["price"] == 20.0
+
+    def test_backfill_does_not_shadow_current_price(self, db):
+        """Re-importing last week's invoice must not overwrite today's
+        price as 'latest' - date_recorded is the clock that matters."""
+        from datetime import date, timedelta
+
+        db.add_item("Roma Tomatoes", category="Produce", default_unit="Case")
+        sysco = db.get_or_create_vendor("Sysco")
+        item_id = db.get_item(name="Roma Tomatoes")["id"]
+
+        today = date.today().isoformat()
+        last_week = (date.today() - timedelta(days=7)).isoformat()
+
+        with db.get_connection() as conn:
+            # Today's sheet arrives first...
+            conn.execute(
+                """INSERT INTO price_history
+                   (item_id, vendor_id, price, unit, date_recorded, source)
+                   VALUES (?, ?, 22.00, 'Case', ?, 'manual')""",
+                (item_id, sysco, today),
+            )
+            # ...then someone re-imports the week-old one
+            conn.execute(
+                """INSERT INTO price_history
+                   (item_id, vendor_id, price, unit, date_recorded, source)
+                   VALUES (?, ?, 18.00, 'Case', ?, 'manual')""",
+                (item_id, sysco, last_week),
+            )
+
+        prices = db.get_latest_prices("Roma Tomatoes")
+        assert len(prices) == 1
+        assert prices[0]["price"] == 22.00
+        assert prices[0]["date_recorded"] == today
 
 
 class TestOrderStatusAndSavings:

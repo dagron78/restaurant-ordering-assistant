@@ -285,8 +285,9 @@ class Database:
         """
         with self.get_connection() as conn:
             # date_recorded has day precision, so several sheets can share the
-            # newest date. Rank by created_at/id to return exactly one row per
-            # vendor: whichever was inserted last.
+            # newest date. Rank date_recorded FIRST - created_at/id only break
+            # same-day ties, because a backfilled old sheet gets a fresh
+            # created_at and must not win.
             cursor = conn.execute("""
                 SELECT vendor, price, unit, date_recorded, source
                 FROM (
@@ -294,7 +295,8 @@ class Database:
                            ph.date_recorded, ph.source,
                            ROW_NUMBER() OVER (
                                PARTITION BY ph.vendor_id
-                               ORDER BY ph.created_at DESC, ph.id DESC
+                               ORDER BY ph.date_recorded DESC, ph.created_at DESC,
+                                        ph.id DESC
                            ) as rn
                     FROM price_history ph
                     JOIN items i ON ph.item_id = i.id
