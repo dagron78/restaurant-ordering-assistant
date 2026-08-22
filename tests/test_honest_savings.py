@@ -11,7 +11,7 @@ savings (a dearer vendor chosen anyway) are preserved unclamped.
 
 import pytest
 
-from core.database import Database, pick_cheapest_alternative
+from core.database import pick_cheapest_alternative
 
 
 class FakeAI:
@@ -111,8 +111,8 @@ class TestCreateOrderVsAlt:
         assert order["lines_without_alt"] == 1
         assert order["savings_vs_alt"] == pytest.approx(4.00)   # Widget line only
 
-        solo_line = next(l for l in order["items"]
-                         if l["item_name"] == "Solo Item")
+        solo_line = next(li for li in order["items"]
+                         if li["item_name"] == "Solo Item")
         assert solo_line["alt_price"] is None
         assert solo_line["alt_vendor_id"] is None
         assert solo_line["savings_vs_alt"] == pytest.approx(0)

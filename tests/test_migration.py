@@ -111,7 +111,7 @@ def test_migrated_db_enforces_new_check_like_fresh(tmp_path):
             with db.get_connection() as conn:
                 conn.execute(
                     "UPDATE orders SET savings_basis = 'bogus' WHERE id = ?",
-                    (result["order_id"],),
+                    (order_id,),
                 )
 
 
