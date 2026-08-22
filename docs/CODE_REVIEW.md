@@ -293,9 +293,15 @@ establishes intent, not outcome.
 | F-40 | Fixed in #5 (non-root container, SCRAPE_DAY guard, scrape delay, safe upload names) |
 | Post-review A/B/C/D/E | All fixed as noted above |
 
-Still genuinely open: **F-16 (UI tests), F-34/F-35
-(remainder), F-38**, and the `google-generativeai` → `google-genai` SDK
-migration (deprecation warning fires on every test run).
+Still genuinely open (deliberately):
+- **F-16 remainder**: AppTest UI tests written but marked `slow_ui`
+  (form-submit interaction needs framework tuning)
+- **F-26**: Won't-fix-not-reproducible (Phase 1 + Phase 3 evidence)
+- **F-33 remainder**: lockfile committed but no automated lockfile-update CI
+- **F-37 remainder**: a few private helpers may still be unused
+- **#26**: AUTH_POSITIVE_SELECTORS need tuning against live signed-in DOM
+- **First real intake run**: needs live mailbox credentials
+- **google-genai migration**: DONE in Phase 6
 
 ---
 
