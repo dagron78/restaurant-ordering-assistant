@@ -143,5 +143,6 @@ pages = [
     st.Page("views/1_📋_Order_Guide.py", title="Order Guide", icon="📋"),
     st.Page("views/2_📈_Trends.py", title="Trends", icon="📈"),
     st.Page("views/3_⚙️_Settings.py", title="Settings", icon="⚙️"),
+    st.Page("views/4_📖_How_This_Works.py", title="How This Works", icon="📖"),
 ]
 st.navigation(pages).run()
