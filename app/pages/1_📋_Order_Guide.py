@@ -16,6 +16,7 @@ from datetime import datetime
 
 from app.components.auth_gate import require_login
 from core.database import Database, pick_cheapest_alternative
+from core.exports import build_order_pdf, build_vendor_email_draft
 from core.recommendation import RecommendationEngine
 
 st.set_page_config(page_title="Order Guide", page_icon="📋", layout="wide")
@@ -422,13 +423,69 @@ if (generate_summary or save_order) and order_items:
 elif generate_summary or save_order:
     st.info("Add quantities to items to generate a summary.")
 
-if export_pdf:
-    st.info("📄 PDF export feature coming soon!")
-    # TODO: Implement PDF generation with reportlab
+def _normalize_basket(lines):
+    """Shape the current basket for core.exports (vendor-grouped totals)."""
+    groups, index, total = [], {}, 0.0
+    for it in lines:
+        g = index.get(it['vendor'])
+        if g is None:
+            g = {'vendor': it['vendor'], 'lines': [], 'subtotal': 0.0}
+            index[it['vendor']] = g
+            groups.append(g)
+        line_total = float(it['total'])
+        g['lines'].append({
+            'item': it['item'], 'qty': it['qty'], 'unit': it['unit'],
+            'unit_price': float(it['unit_price']), 'total': line_total,
+        })
+        g['subtotal'] += line_total
+        total += line_total
+    return {'order_id': None,
+            'date': datetime.now().strftime('%Y-%m-%d'),
+            'groups': groups, 'total': round(total, 2)}
 
-if draft_emails:
-    st.info("📧 Email drafting feature coming soon!")
-    # TODO: Implement email draft generation
+
+if export_pdf or draft_emails:
+    if not order_items:
+        st.info("Add quantities above first - nothing to export yet.")
+    else:
+        basket = _normalize_basket(order_items)
+
+        if export_pdf:
+            try:
+                pdf_bytes = build_order_pdf(basket)
+                st.download_button(
+                    "⬇️ Download PDF",
+                    data=pdf_bytes,
+                    file_name=f"purchase_order_{basket['date']}.pdf",
+                    mime="application/pdf")
+                st.caption(f"{sum(len(g['lines']) for g in basket['groups'])} "
+                           f"lines · {len(basket['groups'])} vendors · "
+                           f"total ${basket['total']:,.2f}")
+            except Exception as e:
+                st.error(f"PDF export failed: {e}")
+
+        if draft_emails:
+            st.markdown("**📧 Vendor email drafts** — review, add recipients, send from your mail client.")
+            for group in basket['groups']:
+                vendor = group['vendor']
+                contact = db.get_vendor(name=vendor)
+                to_addr = (contact or {}).get('contact_email') or None
+                try:
+                    eml = build_vendor_email_draft(
+                        basket, vendor=vendor, to_address=to_addr)
+                except Exception as e:
+                    st.error(f"Draft for {vendor} failed: {e}")
+                    continue
+                fname = vendor.lower().replace(' ', '_')
+                st.download_button(
+                    f"⬇️ {vendor} draft (.eml)",
+                    data=eml,
+                    file_name=f"order_draft_{fname}_{basket['date']}.eml",
+                    mime="message/rfc822",
+                    key=f"eml_{fname}")
+                with st.expander(f"Preview — {vendor}", expanded=False):
+                    body = eml.decode('utf-8', errors='replace').split('\n\n', 1)[-1]
+                    st.text(body)
 
 # Detailed view expander
 with st.expander("🔍 View All Prices by Item"):
