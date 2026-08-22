@@ -7,14 +7,8 @@ requires-python = ">=3.11"
 testpaths = ["tests"]
 addopts = "-q -m 'not slow_ui'"
 markers = [
-    "live: requires a valid GOOGLE_API_KEY and network; skipped by default",
-    "slow_ui: full UI integration test; skipped in fast CI",
-]
-filterwarnings = [
-    # The google.generativeai SDK is deprecated upstream; migrating to
-    # google-genai is tracked separately - don't fail tests over it.
-    "ignore::DeprecationWarning:google.*",
-    "ignore:.*google.generativeai.*:UserWarning",
+    "live: requires a valid GOOGLE_API_KEY and network; run via -m live",
+    "slow_ui: full UI integration test; runs in the dedicated slow-ui CI job",
 ]
 
 [tool.coverage.run]
