@@ -79,11 +79,12 @@ EMAIL_USER=orders@yourrestaurant.com
 EMAIL_PASS=your_email_app_password
 EMAIL_IMAP_SERVER=imap.gmail.com
 
-# Vendor credentials (for web scraping)
-SYSCO_USER=your_username
-SYSCO_PASS=your_password
-USFOODS_USER=your_username
-USFOODS_PASS=your_password
+# Optional: require a password to open the app (recommended!)
+APP_PASSWORD=a-shared-secret
+
+# Vendor logins are NOT stored here - sessions are created manually:
+#   python workers/web_scraper.py --refresh sysco
+#   python workers/web_scraper.py --refresh usfoods
 ```
 
 ### Preferences
@@ -301,6 +302,21 @@ ruff check .
 - `app/` - Streamlit-specific UI code
 - `workers/` - Background task workers
 - `tests/` - pytest suite; no network or API key required
+
+## Security Notes
+
+- **App access**: set `APP_PASSWORD` to require a password on every page.
+  This is a single shared password with unlimited attempts - there is no
+  lockout or rate limiting. That's a deliberate trade-off for a homelab
+  deployment; put the app behind a VPN or reverse proxy with real auth if
+  that isn't acceptable for your network.
+- **Vendor email trust**: price-list ingestion trusts the sender's *domain*
+  only (`sysco.com`, `usfoods.com`, exact/subdomain match). There is no
+  DKIM/SPF verification - anyone who can spoof the sender address can have
+  a PDF ingested as vendor pricing. Prefer a dedicated mailbox and review
+  the processing log (Settings page).
+- **Vendor credentials are not stored anywhere.** Vendor site sessions are
+  created by manual browser login only.
 
 ## Contributing
 

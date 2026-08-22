@@ -16,6 +16,7 @@ import streamlit as st
 
 from core.config import Config
 from core.database import Database
+from app.components.auth_gate import require_login
 
 # Page configuration
 st.set_page_config(
@@ -24,6 +25,8 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+require_login()
 
 # Initialize database
 @st.cache_resource
@@ -165,8 +168,7 @@ with col1:
     
     st.markdown(f"{status_emoji(validation['gemini_api'])} Gemini API Key")
     st.markdown(f"{status_emoji(validation['email'])} Email Credentials")
-    st.markdown(f"{status_emoji(validation['sysco'])} Sysco Credentials")
-    st.markdown(f"{status_emoji(validation['usfoods'])} US Foods Credentials")
+    st.caption("Vendor logins use manual browser session refresh - no vendor passwords stored.")
 
 with col2:
     st.markdown("**Quick Actions**")

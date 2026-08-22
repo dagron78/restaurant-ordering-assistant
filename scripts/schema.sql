@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS price_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     item_id INTEGER NOT NULL,
     vendor_id INTEGER NOT NULL,
-    price REAL NOT NULL,
+    price REAL NOT NULL CHECK(price > 0),
     unit TEXT,
     date_recorded DATE DEFAULT CURRENT_DATE,
     source TEXT CHECK(source IN ('email', 'scrape', 'manual')) DEFAULT 'manual',

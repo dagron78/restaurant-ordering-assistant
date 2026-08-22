@@ -8,7 +8,6 @@ centralized access to all configuration values.
 import os
 from pathlib import Path
 from dotenv import load_dotenv
-from typing import Optional
 
 # Load environment variables from .env file
 load_dotenv()
@@ -33,13 +32,11 @@ class Config:
     EMAIL_IMAP_SERVER: str = os.getenv('EMAIL_IMAP_SERVER', 'imap.gmail.com')
     EMAIL_CHECK_INTERVAL: int = int(os.getenv('EMAIL_CHECK_INTERVAL', '8'))
     
-    # Vendor credentials
-    SYSCO_USER: str = os.getenv('SYSCO_USER', '')
-    SYSCO_PASS: str = os.getenv('SYSCO_PASS', '')
+    # Vendor site URLs.
+    # NOTE: vendor login is handled by manual browser session refresh
+    # (`python workers/web_scraper.py --refresh <vendor>`) - no vendor
+    # usernames/passwords are stored or needed anywhere.
     SYSCO_URL: str = os.getenv('SYSCO_URL', 'https://shop.sysco.com')
-    
-    USFOODS_USER: str = os.getenv('USFOODS_USER', '')
-    USFOODS_PASS: str = os.getenv('USFOODS_PASS', '')
     USFOODS_URL: str = os.getenv('USFOODS_URL', 'https://www.usfoods.com')
     
     # File paths
@@ -52,6 +49,12 @@ class Config:
     # Scheduling
     SCRAPE_DAY: int = int(os.getenv('SCRAPE_DAY', '0'))  # 0=Monday
     SCRAPE_HOUR: int = int(os.getenv('SCRAPE_HOUR', '4'))
+    
+    # Pause between per-item page loads during a scrape (seconds)
+    SCRAPE_DELAY_SECS: float = float(os.getenv('SCRAPE_DELAY_SECS', '2'))
+    
+    # Optional app password. When set, every UI page requires it.
+    APP_PASSWORD: str = os.getenv('APP_PASSWORD', '')
     
     # Vendor email domains to watch
     VENDOR_EMAIL_DOMAINS: list = ['sysco.com', 'usfoods.com']
@@ -95,8 +98,6 @@ class Config:
         results = {
             'gemini_api': bool(cls.GOOGLE_API_KEY),
             'email': bool(cls.EMAIL_USER and cls.EMAIL_PASS),
-            'sysco': bool(cls.SYSCO_USER and cls.SYSCO_PASS),
-            'usfoods': bool(cls.USFOODS_USER and cls.USFOODS_PASS),
             'database_dir': cls.DATABASE_PATH.parent.exists(),
         }
         results['all_valid'] = all([
@@ -105,29 +106,6 @@ class Config:
             results['database_dir']
         ])
         return results
-    
-    @classmethod
-    def get_vendor_config(cls, vendor_name: str) -> Optional[dict]:
-        """Get configuration for a specific vendor."""
-        vendor_configs = {
-            'sysco': {
-                'name': 'Sysco',
-                'user': cls.SYSCO_USER,
-                'password': cls.SYSCO_PASS,
-                'url': cls.SYSCO_URL,
-                'session_file': cls.get_session_file('sysco'),
-                'email_domain': 'sysco.com'
-            },
-            'us foods': {
-                'name': 'US Foods',
-                'user': cls.USFOODS_USER,
-                'password': cls.USFOODS_PASS,
-                'url': cls.USFOODS_URL,
-                'session_file': cls.get_session_file('US Foods'),
-                'email_domain': 'usfoods.com'
-            }
-        }
-        return vendor_configs.get(vendor_name.lower())
 
 
 # Ensure directories exist on module load

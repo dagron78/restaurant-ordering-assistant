@@ -85,8 +85,6 @@ def init_database(reset: bool = False) -> None:
     status_icons = {True: '✓', False: '✗'}
     print(f"   {status_icons[validation['gemini_api']]} Gemini API key configured")
     print(f"   {status_icons[validation['email']]} Email credentials configured")
-    print(f"   {status_icons[validation['sysco']]} Sysco credentials configured")
-    print(f"   {status_icons[validation['usfoods']]} US Foods credentials configured")
     
     if not validation['gemini_api']:
         print("\n⚠️  Warning: Gemini API key not configured.")
@@ -161,7 +159,9 @@ def add_sample_data(db: Database = None, days: int = 30) -> None:
     vendors = ['Sysco', 'US Foods']
     today = date.today()
     
-    price_count = 0
+    # Build all rows first, then insert as ONE batch - add_price() opens
+    # three connections per row, which is ~1800 for this loop otherwise.
+    rows = []
     for item_name, base_price in base_prices.items():
         item = db.get_item(name=item_name)
         unit = item.get('default_unit', 'Each') if item else 'Each'
@@ -171,7 +171,7 @@ def add_sample_data(db: Database = None, days: int = 30) -> None:
             vendor_modifier = random.uniform(0.95, 1.05)
             total_drift = random.uniform(-0.15, 0.15)
             
-            # Oldest first: insert order defines which row is "latest"
+            # Oldest first: date_recorded defines which row is "latest"
             for day_offset in range(days - 1, -1, -1):
                 progress = (days - 1 - day_offset) / max(days - 1, 1)
                 daily_noise = random.uniform(0.98, 1.02)
@@ -182,17 +182,16 @@ def add_sample_data(db: Database = None, days: int = 30) -> None:
                     2
                 )
                 
-                recorded = (today - timedelta(days=day_offset)).isoformat()
-                db.add_price(
-                    item_name=item_name,
-                    vendor_name=vendor,
-                    price=price,
-                    unit=unit,
-                    source='manual',
-                    confidence=1.0,
-                    date_recorded=recorded
-                )
-                price_count += 1
+                rows.append({
+                    'item_name': item_name,
+                    'vendor_name': vendor,
+                    'price': price,
+                    'unit': unit,
+                    'confidence': 1.0,
+                    'date_recorded': (today - timedelta(days=day_offset)).isoformat(),
+                })
+    
+    price_count = db.add_prices_batch(rows, source='manual')
     
     print(f"   ✓ Added {price_count} sample prices across {days} days")
     print("\n✅ Sample data added successfully!")
