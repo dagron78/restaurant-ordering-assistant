@@ -16,7 +16,6 @@ import pandas as pd
 from app.components.auth_gate import require_login
 from core.database import Database
 from core.recommendation import RecommendationEngine
-
 st.set_page_config(page_title="Price Trends & Savings", page_icon="📈", layout="wide")
 
 require_login()
@@ -26,7 +25,13 @@ st.markdown("*Analyze pricing history, track savings, and identify opportunities
 
 # Initialize
 db = Database()
-engine = RecommendationEngine()
+try:
+    engine = RecommendationEngine()
+except ValueError:
+    st.error("🔑 **Gemini API key is not configured.** This page needs it to "
+             "score trends and recommendations.")
+    st.info("Copy `.env.example` to `.env`, set `GOOGLE_API_KEY`, then restart the app.")
+    st.stop()
 
 # Load custom CSS
 css_path = Path(__file__).parent.parent / 'assets' / 'style.css'

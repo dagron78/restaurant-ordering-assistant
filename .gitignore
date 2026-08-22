@@ -65,3 +65,5 @@ htmlcov/
 # Playwright
 playwright-report/
 test-results/
+*.db-wal
+*.db-shm
