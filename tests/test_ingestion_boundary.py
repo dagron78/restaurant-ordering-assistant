@@ -33,10 +33,15 @@ def _png(tmp_path):
 
 
 @pytest.fixture()
-def monitor(monkeypatch):
-    # New monitor takes ai= injection; no module attr to patch.
+def monitor(tmp_path):
+    """EmailMonitor against a properly initialised tmp DB."""
+    from core.database import Database
     import workers.email_monitor as em
-    return em.EmailMonitor(ai=_StubAI())
+    db = Database(db_path=tmp_path / "intake.db")
+    db.init_database()
+    db.get_or_create_vendor("Sysco", email_domain="sysco.com")
+    db.get_or_create_vendor("US Foods", email_domain="usfoods.com")
+    return em.EmailMonitor(db=db, ai=_StubAI())
 
 
 class TestParseDocumentRowResilience:
