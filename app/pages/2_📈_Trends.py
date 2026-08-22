@@ -88,10 +88,12 @@ with tab1:
     
     with col2:
         st.metric(
-            "Total Saved",
-            f"${total_savings['total_savings_vs_max']:,.2f}",
+            "Net Saved",
+            f"${total_savings['total_savings_vs_alt']:,.2f}",
             delta=f"{total_savings['savings_percentage']:.1f}%",
-            help="Money saved by choosing optimal vendors"
+            help="Versus each line's cheapest alternative quote at order "
+                 "time (issue #17 basis). Legacy orders migrated where the "
+                 "two-vendor equivalence held."
         )
     
     with col3:
@@ -104,10 +106,14 @@ with tab1:
     with col4:
         avg_savings = total_savings['avg_savings_per_order']
         st.metric(
-            "Avg Savings/Order",
+            "Avg Net Savings/Order",
             f"${avg_savings:,.2f}",
-            help="Average savings per order"
+            help="Average net savings per completed order"
         )
+    
+    if total_savings.get('lines_without_alt'):
+        st.caption(f"ℹ️ {int(total_savings['lines_without_alt'])} order line(s) had no "
+                   "alternative quote and are excluded from savings totals.")
     
     st.divider()
     
@@ -134,7 +140,7 @@ with tab1:
         chart_data = pd.DataFrame({
             'Period': savings_df['period'],
             'Total Spent': savings_df['total_spent'].fillna(0),
-            'Savings': savings_df['total_savings_vs_max'].fillna(0)
+            'Net Saved': savings_df['total_savings_vs_alt'].fillna(0)
         })
         chart_data = chart_data.set_index('Period')
         
@@ -145,7 +151,7 @@ with tab1:
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            total_period_savings = savings_df['total_savings_vs_max'].sum()
+            total_period_savings = savings_df['total_savings_vs_alt'].sum()
             st.metric(f"Total Savings ({period_type})", f"${total_period_savings:,.2f}")
         
         with col2:
@@ -153,7 +159,7 @@ with tab1:
             st.metric("Total Orders", int(total_orders))
         
         with col3:
-            avg_per_period = savings_df['total_savings_vs_max'].mean()
+            avg_per_period = savings_df['total_savings_vs_alt'].mean()
             st.metric(f"Avg Savings per {period_type.rstrip('ly')}", f"${avg_per_period:,.2f}")
         
         # Savings trend table

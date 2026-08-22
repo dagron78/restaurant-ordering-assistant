@@ -279,7 +279,7 @@ establishes intent, not outcome.
 | F-15 | Fixed in #5 (HTML scrubbed + capped pre-AI) |
 | F-16 | Partially: 12→145 tests incl. UI-free coverage of core/workers; Streamlit UI tests still open |
 | F-17 / F-18 | Open (preference-engine rework) |
-| F-19 / F-21 / F-22 | Open (metric semantics — needs a product decision on what "savings" should mean) |
+| F-19 / F-21 / F-22 | Fixed in Phase 2 (issue #17). Decision: savings = versus the **cheapest alternative** vendor's latest quote at order time — min over others, never max/average; N-vendor correct from day one (a two-vendor reading of max≡min would have been the signature correct-under-an-unstated-assumption bug). Baselines frozen at write time on order_items; legacy rows stamped `vs_alt`/`unknown_legacy` during migration 001 (two-vendor equivalence recorded once). Behavioural citations: tests/test_honest_savings.py (three-vendor, dearest-chosen-negative, zero-others exclusion+count, tie-break, frozen baseline, preview/save parity), tests/test_migration.py (legacy stamping + structural identity) |
 | F-20 / F-29 / F-31 | Fixed in #4 |
 | F-23 | Fixed in #3 |
 | F-25 / F-26 / F-27 | F-25/F-27 fixed in #5; **F-26 open** (preferences text-area session state) |
@@ -288,13 +288,13 @@ establishes intent, not outcome.
 | F-32 | Fixed in #5 (single windowed query; query-count test) |
 | F-33 | Open (dependency ceilings/lockfile) |
 | F-34 / F-35 | Open (session validity check; Docker session refresh) |
-| F-37 | Partially: `_parse_price` deduped in #4; dead public methods remain |
+| F-37 | Partially: `_parse_price` deduped in #4; `get_max_price_for_item` retired in Phase 2 (max is no longer any basis); remaining dead methods still open |
 | F-38 | Open (logging migration off print()) |
 | F-40 | Fixed in #5 (non-root container, SCRAPE_DAY guard, scrape delay, safe upload names) |
 | Post-review A/B/C/D/E | All fixed as noted above |
 
 Still genuinely open: **F-16 (UI tests), F-17/F-18 (preference engine),
-F-19/F-21/F-22 (savings semantics), F-26, F-33, F-34/F-35, F-37
+F-26, F-33, F-34/F-35, F-37
 (remainder), F-38**, and the `google-generativeai` → `google-genai` SDK
 migration (deprecation warning fires on every test run).
 

@@ -960,6 +960,8 @@ class Database:
                     SUM(total_amount) as total_spent,
                     SUM(savings_vs_avg) as total_savings_vs_avg,
                     SUM(savings_vs_max) as total_savings_vs_max,
+                    COALESCE(SUM(savings_vs_alt), 0) as total_savings_vs_alt,
+                    COALESCE(SUM(lines_without_alt), 0) as lines_without_alt,
                     MIN(date(order_date)) as period_start,
                     MAX(date(order_date)) as period_end
                 FROM orders
@@ -990,7 +992,9 @@ class Database:
                     COALESCE(SUM(total_amount), 0) as total_spent,
                     COALESCE(SUM(savings_vs_avg), 0) as total_savings_vs_avg,
                     COALESCE(SUM(savings_vs_max), 0) as total_savings_vs_max,
-                    COALESCE(AVG(savings_vs_max), 0) as avg_savings_per_order
+                    COALESCE(SUM(savings_vs_alt), 0) as total_savings_vs_alt,
+                    COALESCE(SUM(lines_without_alt), 0) as lines_without_alt,
+                    COALESCE(AVG(savings_vs_alt), 0) as avg_savings_per_order
                 FROM orders
                 WHERE status = 'completed'
             """
@@ -1009,10 +1013,13 @@ class Database:
             
             if row:
                 result = dict(row)
-                # Calculate savings percentage
+                # Headline percentage on the honest basis (#17): versus the
+                # cheapest alternative actually available at order time.
                 if result['total_spent'] > 0:
-                    potential_spend = result['total_spent'] + result['total_savings_vs_max']
-                    result['savings_percentage'] = (result['total_savings_vs_max'] / potential_spend) * 100
+                    potential = result['total_spent'] + result['total_savings_vs_alt']
+                    result['savings_percentage'] = (
+                        (result['total_savings_vs_alt'] / potential) * 100
+                        if potential > 0 else 0)
                 else:
                     result['savings_percentage'] = 0
                 return result
@@ -1022,6 +1029,8 @@ class Database:
                 'total_spent': 0,
                 'total_savings_vs_avg': 0,
                 'total_savings_vs_max': 0,
+                'total_savings_vs_alt': 0,
+                'lines_without_alt': 0,
                 'avg_savings_per_order': 0,
                 'savings_percentage': 0
             }
