@@ -13,6 +13,13 @@ from contextlib import contextmanager
 
 from .config import Config
 
+# The one definition of "most recent price". date_recorded decides which
+# sheet is newest; created_at/id only break same-day ties (a backfilled
+# old sheet gets a fresh created_at and must NOT win).
+# Issue #9 happened because this ordering existed as two copies; keep it
+# as one. Referenced via f-string in both ranking queries below.
+LATEST_PRICE_RANK_ORDER = "ph.date_recorded DESC, ph.created_at DESC, ph.id DESC"
+
 
 class Database:
     """SQLite database manager with connection pooling and helper methods."""
@@ -379,15 +386,14 @@ class Database:
             # newest date. Rank date_recorded FIRST - created_at/id only break
             # same-day ties, because a backfilled old sheet gets a fresh
             # created_at and must not win.
-            cursor = conn.execute("""
+            cursor = conn.execute(f"""
                 SELECT vendor, price, unit, date_recorded, source
                 FROM (
                     SELECT v.name as vendor, ph.price, ph.unit,
                            ph.date_recorded, ph.source,
                            ROW_NUMBER() OVER (
                                PARTITION BY ph.vendor_id
-                               ORDER BY ph.date_recorded DESC, ph.created_at DESC,
-                                        ph.id DESC
+                               ORDER BY {LATEST_PRICE_RANK_ORDER}
                            ) as rn
                     FROM price_history ph
                     JOIN items i ON ph.item_id = i.id
@@ -468,14 +474,13 @@ class Database:
         cutoff_date = (datetime.now() - timedelta(days=Config.TREND_DAYS)).strftime('%Y-%m-%d')
         
         with self.get_connection() as conn:
-            cursor = conn.execute("""
+            cursor = conn.execute(f"""
                 WITH latest AS (
                     SELECT ph.item_id, ph.vendor_id, ph.price, ph.unit,
                            ph.date_recorded, ph.source,
                            ROW_NUMBER() OVER (
                                PARTITION BY ph.item_id, ph.vendor_id
-                               ORDER BY ph.date_recorded DESC, ph.created_at DESC,
-                                        ph.id DESC
+                               ORDER BY {LATEST_PRICE_RANK_ORDER}
                            ) as rn
                     FROM price_history ph
                 ),
