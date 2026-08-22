@@ -21,7 +21,7 @@ A smart ordering application for restaurants that monitors vendor prices, tracks
 
 ### Prerequisites
 
-- Python 3.10+
+- Python 3.11+ (matches the `python:3.11-slim` image the Dockerfile builds)
 - Google Gemini API key ([Get one here](https://makersuite.google.com/app/apikey))
 - Email account for receiving vendor price lists
 - Vendor login credentials (Sysco, US Foods)
@@ -289,7 +289,7 @@ pytest tests/
 ```
 
 Tests run automatically in CI (`.github/workflows/ci.yml`) on every push to
-`master` and every pull request: ruff lint, a test matrix on Python 3.10/3.11
+`master` and every pull request: ruff lint, a test suite on Python 3.11
 with coverage, and a Docker image build.
 
 ### Linting
