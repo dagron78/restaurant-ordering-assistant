@@ -1,0 +1,14 @@
+{
+  "prose": "Alert me if Avocados exceed $55 per case.",
+  "response": "```json\n[\n  {\n    \"rule_type\": \"price_threshold\",\n    \"item_pattern\": \"Avocados\",\n    \"condition\": {\n      \"comparator\": \">\",\n      \"threshold\": 55\n    },\n    \"action\": \"Alert if price exceeds $55 per case\"\n  }\n]\n```",
+  "expect": [
+    {
+      "rule_type": "price_threshold",
+      "item_pattern": "Avocados",
+      "condition": {
+        "comparator": ">",
+        "threshold": 55
+      }
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "prose": "Notify me when Heavy Cream increases more than 10%.\nQuality over price for all beef products.",
+  "response": "```json\n[\n  {\n    \"rule_type\": \"alert\",\n    \"item_pattern\": \"Heavy Cream\",\n    \"condition\": {},\n    \"action\": \"Notify when Heavy Cream price increases more than 10%\"\n  },\n  {\n    \"rule_type\": \"quality_rule\",\n    \"item_pattern\": \"beef products\",\n    \"condition\": {},\n    \"action\": \"Prioritize quality over price for all beef products\"\n  }\n]\n```",
+  "expect": [
+    {
+      "rule_type": "alert",
+      "item_pattern": "Heavy Cream",
+      "condition": {}
+    },
+    {
+      "rule_type": "quality_rule",
+      "item_pattern": "beef products",
+      "condition": {}
+    }
+  ]
+}

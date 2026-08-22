@@ -1,0 +1,13 @@
+{
+  "prose": "Never buy frozen fish from Gfs.",
+  "response": "```json\n[\n  {\n    \"rule_type\": \"exclusion\",\n    \"item_pattern\": \"frozen fish\",\n    \"condition\": {\n      \"vendor\": \"Gfs\"\n    },\n    \"action\": \"Never buy frozen fish from Gfs\"\n  }\n]\n```",
+  "expect": [
+    {
+      "rule_type": "exclusion",
+      "item_pattern": "frozen fish",
+      "condition": {
+        "vendor": "Gfs"
+      }
+    }
+  ]
+}
