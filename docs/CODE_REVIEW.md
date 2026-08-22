@@ -278,7 +278,7 @@ establishes intent, not outcome.
 | F-14 | Fixed in #5 (deterministic validation; per-row extraction coercion added post-review) |
 | F-15 | Fixed in #5 (HTML scrubbed + capped pre-AI) |
 | F-16 | Partially: 12→145 tests incl. UI-free coverage of core/workers; Streamlit UI tests still open |
-| F-17 / F-18 | Fixed in Phase 3 (issue #20). `load_preferences` parses only when sha256(preferences.txt) differs from `prefs_meta.source_hash` — reads never re-parse and never wipe (call-COUNT asserted). Rules are typed predicates (`condition_json`) evaluated by `core/rules.py`: priority order, exclusions-before-preferences at equal priority, earlier-id tie-break, per-rule thresholds replacing the 15% constant, all-excluded → offending rule named. Behavioural citations: tests/test_rules.py (rule matrix), tests/test_prefs_cache.py (call counts) |
+| F-17 / F-18 | Fixed in Phase 3 (issue #20). `load_preferences` parses only when sha256(preferences.txt) differs from `prefs_meta.source_hash` — reads never re-parse and never wipe (call-COUNT asserted). Rules are typed predicates (`condition_json`) evaluated by `core/rules.py`: priority order, exclusions-before-preferences at equal priority, earlier-id tie-break, per-rule thresholds replacing the 15% constant, all-excluded → offending rule named. Behavioural citations: tests/test_rules.py (rule matrix), tests/test_prefs_cache.py (call counts); parser verified against real Gemini output via committed golden fixtures (#22, tests/fixtures/golden_prefs) |
 | F-19 / F-21 / F-22 | Fixed in Phase 2 (issue #17). Decision: savings = versus the **cheapest alternative** vendor's latest quote at order time — min over others, never max/average; N-vendor correct from day one (a two-vendor reading of max≡min would have been the signature correct-under-an-unstated-assumption bug). Baselines frozen at write time on order_items; legacy rows stamped `vs_alt`/`unknown_legacy` during migration 001 (two-vendor equivalence recorded once). Behavioural citations: tests/test_honest_savings.py (three-vendor, dearest-chosen-negative, zero-others exclusion+count, tie-break, frozen baseline, preview/save parity), tests/test_migration.py (legacy stamping + structural identity) |
 | F-20 / F-29 / F-31 | Fixed in #4 |
 | F-23 | Fixed in #3 |
@@ -287,7 +287,7 @@ establishes intent, not outcome.
 | F-30 | Fixed in #5; ingestion no longer auto-creates items (post-review hardening) |
 | F-32 | Fixed in #5 (single windowed query; query-count test) |
 | F-33 | Open (dependency ceilings/lockfile) |
-| F-34 / F-35 | Open (session validity check; Docker session refresh) |
+| F-34 / F-35 | Fixed in Phase 4 (issue #24). Positive session probe (fail-closed: signed-in marker required; login-form absence is never auth) gates every scrape and re-probes on cadence; mid-scrape lapse keeps fetched rows + records partial with error. Refresh docs now say workstation-only with concrete paths; in-container instructions removed. Citations: tests/test_session_gate.py |
 | F-37 | Partially: `_parse_price` deduped in #4; `get_max_price_for_item` retired in Phase 2 (max is no longer any basis); remaining dead methods still open |
 | F-38 | Open (logging migration off print()) |
 | F-40 | Fixed in #5 (non-root container, SCRAPE_DAY guard, scrape delay, safe upload names) |

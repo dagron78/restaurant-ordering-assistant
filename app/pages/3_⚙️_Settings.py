@@ -317,11 +317,13 @@ with tab3:
         
         if st.button("🔄 Refresh Sysco Login"):
             st.info("""
-            To refresh Sysco login:
+            To refresh Sysco login (run on a workstation - the container
+            has no display or TTY):
             ```
             python workers/web_scraper.py --refresh sysco
             ```
-            This will open a browser for you to log in manually.
+            This will open a browser for you to log in manually. The session
+            file lands in data/sessions/, which the container mounts.
             """)
         
         st.divider()

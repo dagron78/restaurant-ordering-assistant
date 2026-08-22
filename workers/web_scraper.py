@@ -50,6 +50,49 @@ class VendorScraper(ABC):
         # Scraping configuration
         self.headless = True
         self.timeout = 30000  # 30 seconds
+
+    # ---- session authentication (issue #24) ------------------------------
+    #
+    # Detect logged-IN, never "not logged-out": absence of a login form is
+    # not authentication - redirects, error pages and interstitials all lack
+    # login forms too. The probe FAILS CLOSED: a run proceeds only when a
+    # positive marker (something only a signed-in session renders) is found.
+    #
+    # Subclasses must tune AUTH_POSITIVE_SELECTORS to their vendor's real
+    # signed-in DOM; until tuned, scrapes fail closed rather than trusting
+    # public catalog pages.
+    AUTH_NEGATIVE_SELECTORS: List[str] = [
+        'input[type="password"]',
+        '#login-form',
+        '.login-form',
+        '[data-testid="login"]',
+        'form[action*="login" i]',
+    ]
+    AUTH_POSITIVE_SELECTORS: List[str] = []
+    REPROBE_EVERY = 10          # re-verify the session every N items
+
+    def _verify_logged_in(self, page: Any):
+        """
+        Positive authentication check against the live page.
+
+        Returns:
+            (True, 'ok') only when an AUTH_POSITIVE_SELECTORS element renders;
+            (False, reason) otherwise. A login form present is a definite NO;
+            anything else without a positive marker is also NO - fail closed.
+        """
+        for selector in self.AUTH_NEGATIVE_SELECTORS:
+            try:
+                if page.query_selector(selector):
+                    return False, f'login form detected ({selector})'
+            except Exception:
+                continue                       # bad selector on this site
+        for selector in self.AUTH_POSITIVE_SELECTORS:
+            try:
+                if page.query_selector(selector):
+                    return True, 'ok'
+            except Exception:
+                continue
+        return False, 'signed-in marker not found'
     
     def _check_playwright(self) -> bool:
         """Check if Playwright is available."""
@@ -88,6 +131,9 @@ class VendorScraper(ABC):
         
         Opens a browser window for the user to log in manually.
         Saves the session state for future automated runs.
+
+        NOTE: requires a display and an interactive TTY - run this on a
+        workstation, never inside the headless container.
         
         Args:
             login_url: Optional specific login URL
@@ -428,15 +474,46 @@ class VendorScraper(ABC):
                 browser, context = self._get_browser_context(p)
                 page = context.new_page()
                 page.set_default_timeout(self.timeout)
-                
+
+                # Gate the whole run on a POSITIVE session check (issue #24):
+                # a stamp or session file proves nothing about THIS page.
+                auth_ok, auth_reason = self._verify_logged_in(page)
+                if not auth_ok:
+                    error = f'Not authenticated: {auth_reason}'
+                    results.update(success=False, error=error,
+                                   auth_reason=auth_reason,
+                                   items_scraped=0)
+                    self.db.log_processing(
+                        source_type='scrape',
+                        source_identifier=self.vendor_name,
+                        filename='weekly_scrape', status='failed',
+                        items_processed=0,
+                        error_message=error)
+                    print(f"  ✗ aborted: {error}")
+                    browser.close()
+                    return results
+                results['auth'] = 'ok'
+
+                mid_scrape_expiry = None
                 for index, item in enumerate(items):
                     item_name = item['name']
-                    
+
                     # Rate limit between lookups - vendor sites throttle
                     # aggressive sequential requests
                     if index > 0 and Config.SCRAPE_DELAY_SECS > 0:
                         time.sleep(Config.SCRAPE_DELAY_SECS)
-                                        
+
+                    # Sessions can lapse mid-run (issue #24 trap): re-probe
+                    # on a cadence. Defined outcome on lapse - stop, keep the
+                    # already-fetched rows, record PARTIAL with an error.
+                    if index > 0 and index % self.REPROBE_EVERY == 0:
+                        re_ok, re_reason = self._verify_logged_in(page)
+                        if not re_ok:
+                            mid_scrape_expiry = (
+                                f'Session expired mid-scrape after {index} '
+                                f'items: {re_reason}')
+                            break
+
                     try:
                         # Navigate to search
                         search_url = self.get_search_url(item_name)
@@ -472,13 +549,30 @@ class VendorScraper(ABC):
                 
                 browser.close()
             
-            # Log processing
+            if mid_scrape_expiry:
+                results['success'] = False
+                results['session_expired_after_items'] = index
+                results['error'] = mid_scrape_expiry
+            
+            # Log processing - every outcome must be distinguishable:
+            #   start-auth failure   -> failed
+            #   mid-scrape lapse     -> partial (earlier rows kept, error says so)
+            #   clean with prices    -> success
+            #   clean, nothing found -> partial
+            if mid_scrape_expiry:
+                log_status = 'partial'
+            elif not results['success']:
+                log_status = 'failed'
+            else:
+                log_status = 'success' if results['items_scraped'] > 0 else 'partial'
             self.db.log_processing(
                 source_type='scrape',
                 source_identifier=self.vendor_name,
                 filename='weekly_scrape',
-                status='success' if results['items_scraped'] > 0 else 'partial',
-                items_processed=results['items_scraped']
+                status=log_status,
+                items_processed=results['items_scraped'],
+                error_message=(mid_scrape_expiry
+                               or '; '.join(results['errors'][:3]) or None)
             )
             
             return results
@@ -500,6 +594,17 @@ class VendorScraper(ABC):
 
 class SyscoScraper(VendorScraper):
     """Sysco-specific scraper implementation."""
+    
+    # Positive signed-in markers - tune to the real DOM when credential
+    # access exists. Until tuned, scrapes FAIL CLOSED (issue #24): an empty
+    # or generic page is never treated as authenticated.
+    AUTH_POSITIVE_SELECTORS = [
+        '[data-testid="account-menu"]',
+        '.account-menu',
+        '.user-account',
+        'a[href*="/account"]',
+        '[class*="account-nav"]',
+    ]
     
     def __init__(self, **kwargs):
         super().__init__(
@@ -553,6 +658,14 @@ class SyscoScraper(VendorScraper):
 
 class USFoodsScraper(VendorScraper):
     """US Foods-specific scraper implementation."""
+    
+    AUTH_POSITIVE_SELECTORS = [
+        '[data-testid="account-menu"]',
+        '.account-menu',
+        '.user-account',
+        'a[href*="/account"]',
+        '[class*="account-nav"]',
+    ]
     
     def __init__(self, **kwargs):
         super().__init__(
