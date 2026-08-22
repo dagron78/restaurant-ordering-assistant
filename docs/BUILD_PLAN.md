@@ -230,6 +230,11 @@ logged error, not a price.
 
 ## Phase 5 · Finish the advertised features
 
+> **STATUS: DONE** — `phase/5-visible-payoff`. PDF order sheet
+> (grouped by vendor, totals round-tripped through pypdf in tests) and one
+> review-and-send .eml draft per vendor — no outbound SMTP surface.
+> Gate: tests/test_exports.py; mutation matrix in PR #26.
+
 **PDF export.** A printable order sheet grouped by vendor: item, quantity, unit,
 unit price, line total, per-vendor subtotal, order total and date. This is the
 artifact that gets carried to the walk-in, so plain and legible beats styled.
