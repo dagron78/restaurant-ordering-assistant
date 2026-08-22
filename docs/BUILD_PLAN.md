@@ -154,8 +154,9 @@ clamp silently), and the excluded-line count reaching the UI.
 > deleted per F-37/F-14), priority composition with stated tie-breaks,
 > all-excluded → offending rule named, per-rule thresholds replacing the 15%
 > constant, golden-fixture harness for the parser
-> (`scripts/capture_golden_preferences.py`; tests skip until captures exist —
-> stub/parser circularity), F-26 resolved Won't-fix-not-reproducible.
+> (`scripts/capture_golden_preferences.py`; five golden captures committed and
+> replayed in CI — prompt v2 validated against real model output, closing the
+> stub/parser circularity trap), F-26 resolved Won't-fix-not-reproducible.
 > See issue #20 and tests/test_rules.py + tests/test_prefs_cache.py.
 
 This is the product's headline claim ("Combines price data with your preferences")
