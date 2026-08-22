@@ -12,7 +12,6 @@ import io
 import json
 from email import message_from_bytes
 
-import pytest
 
 from core.exports import build_order_pdf, build_vendor_email_draft
 
