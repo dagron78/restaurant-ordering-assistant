@@ -20,6 +20,9 @@ from google.genai import types as gtypes
 import PIL.Image
 
 from .config import Config
+import logging
+
+log = logging.getLogger(__name__)
 
 
 class GeminiEngine:
@@ -69,7 +72,7 @@ class GeminiEngine:
                 last_error = e
                 if attempt < self.max_retries - 1:
                     wait_time = self.retry_delay * (2 ** attempt)
-                    print(f"API call failed, retrying in {wait_time}s: {e}")
+                    log.warning(f"API call failed, retrying in {wait_time}s: {e}")
                     time.sleep(wait_time)
 
         raise Exception(
@@ -158,12 +161,12 @@ class GeminiEngine:
         try:
             items = json.loads(clean_json)
         except json.JSONDecodeError as e:
-            print(f"JSON parse error: {e}")
-            print(f"Raw response: {clean_json[:500]}")
+            log.warning(f"JSON parse error: {e}")
+            log.info(f"Raw response: {clean_json[:500]}")
             return []
         
         if not isinstance(items, list):
-            print("Model response was not a JSON array; discarding")
+            log.info("Model response was not a JSON array; discarding")
             return []
         
         # Per-row coercion: one malformed line ("N/A", "$24.50") must cost
@@ -176,7 +179,7 @@ class GeminiEngine:
                 name = str(item['item_name']).strip()
                 price = float(item['price'])
             except (KeyError, TypeError, ValueError) as e:
-                print(f"Skipping malformed extracted row ({e}): {str(item)[:120]}")
+                log.warning(f"Skipping malformed extracted row ({e}): {str(item)[:120]}")
                 continue
             
             validated_items.append({
@@ -188,7 +191,7 @@ class GeminiEngine:
         
         dropped = len(items) - len(validated_items)
         if dropped:
-            print(f"Dropped {dropped} of {len(items)} rows during extraction cleanup")
+            log.info(f"Dropped {dropped} of {len(items)} rows during extraction cleanup")
         
         return validated_items
     
@@ -267,13 +270,13 @@ class GeminiEngine:
             try:
                 capture_raw(response)
             except Exception as e:
-                print(f"capture_raw callback failed (ignored): {e}")
+                log.warning(f"capture_raw callback failed (ignored): {e}")
         clean_json = self._clean_json_response(response)
         
         try:
             rules = json.loads(clean_json)
         except json.JSONDecodeError:
-            print(f"Failed to parse preferences: {clean_json[:200]}")
+            log.warning(f"Failed to parse preferences: {clean_json[:200]}")
             return []
         
         if not isinstance(rules, list):
@@ -433,7 +436,7 @@ class GeminiEngine:
                 continue
             
             if not (self.MIN_SANE_PRICE <= price <= self.MAX_SANE_PRICE):
-                print(f"Dropping {name!r}: price {price} outside sane bounds")
+                log.warning(f"Dropping {name!r}: price {price} outside sane bounds")
                 continue
             
             unit = str(raw.get('unit') or 'Each').strip() or 'Each'
@@ -454,6 +457,6 @@ class GeminiEngine:
         
         dropped = len(prices) - len(validated)
         if dropped:
-            print(f"Price validation dropped {dropped} of {len(prices)} extracted rows")
+            log.info(f"Price validation dropped {dropped} of {len(prices)} extracted rows")
         
         return validated

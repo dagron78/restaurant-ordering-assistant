@@ -12,6 +12,9 @@ from typing import List, Dict, Optional
 from contextlib import contextmanager
 
 from .config import Config
+import logging
+
+log = logging.getLogger(__name__)
 
 # The one definition of "most recent price". date_recorded decides which
 # sheet is newest; created_at/id only break same-day ties (a backfilled
@@ -435,7 +438,7 @@ class Database:
                     added += 1
                     
                 except Exception as e:
-                    print(f"Skipping price for {item_name!r}: {e}")
+                    log.warning(f"Skipping price for {item_name!r}: {e}")
                     continue
         
         return added

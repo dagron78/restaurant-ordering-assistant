@@ -104,10 +104,10 @@ def signal_handler(signum, frame):
 
 def main():
     """Main entry point for the scheduler."""
-    print(f"\n{'='*60}")
-    print("🕐 Restaurant Ordering Assistant - Background Scheduler")
-    print(f"{'='*60}")
-    print(f"\nStarted at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info(f"\n{'='*60}")
+    logger.info("🕐 Restaurant Ordering Assistant - Background Scheduler")
+    logger.info(f"{'='*60}")
+    logger.info(f"\nStarted at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
     # Register signal handlers
     signal.signal(signal.SIGINT, signal_handler)
@@ -117,17 +117,17 @@ def main():
     scheduler = create_scheduler()
     
     # Print scheduled jobs
-    print("\n📋 Scheduled Jobs:")
+    logger.info("\n📋 Scheduled Jobs:")
     for job in scheduler.get_jobs():
-        print(f"   - {job.name}")
-        print(f"     Next run: {job.next_run_time}")
+        logger.info(f"   - {job.name}")
+        logger.info(f"     Next run: {job.next_run_time}")
     
-    print(f"\n{'='*60}")
-    print("Scheduler running. Press Ctrl+C to stop.")
-    print(f"{'='*60}\n")
+    logger.info(f"\n{'='*60}")
+    logger.info("Scheduler running. Press Ctrl+C to stop.")
+    logger.info(f"{'='*60}\n")
     
     # Run initial email check
-    print("Running initial email check...")
+    logger.info("Running initial email check...")
     email_job()
     
     # Start scheduler

@@ -12,6 +12,9 @@ from .config import Config
 from .database import Database
 from .ai_engine import GeminiEngine
 from .rules import apply_rules
+import logging
+
+log = logging.getLogger(__name__)
 
 
 class RecommendationEngine:
@@ -79,7 +82,7 @@ class RecommendationEngine:
             return self.preferences
 
         except Exception as e:
-            print(f"Error loading preferences: {e}")
+            log.warning(f"Error loading preferences: {e}")
             self.preferences = []
             self._preferences_loaded = True
             return []

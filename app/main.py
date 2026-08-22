@@ -5,6 +5,10 @@ Streamlit-based web interface for managing restaurant ordering.
 Run with: streamlit run app/main.py
 """
 
+import logging
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s %(name)s %(levelname)s %(message)s')
+
 import base64
 import sys
 from pathlib import Path

@@ -18,6 +18,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from core.config import Config
 from core.database import Database
 from core.ai_engine import GeminiEngine
+import logging
+
+log = logging.getLogger(__name__)
 
 
 class EmailMonitor:
@@ -236,7 +239,7 @@ class EmailMonitor:
                     # Process attachments
                     for att in msg.attachments:
                         if self._is_price_document(att.filename):
-                            print(f"Processing: {att.filename} from {vendor_name}")
+                            log.info(f"Processing: {att.filename} from {vendor_name}")
                             
                             count, error = self._process_attachment(
                                 att.payload,
@@ -293,32 +296,36 @@ def run_email_check() -> dict:
     Returns:
         Processing results dict
     """
-    print(f"\n{'='*50}")
-    print(f"📧 Email Monitor - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"{'='*50}")
+    log.info(f"\n{'='*50}")
+    log.info(f"📧 Email Monitor - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    log.info(f"{'='*50}")
     
     monitor = EmailMonitor()
     results = monitor.check_for_price_updates()
     
     if results['success']:
-        print("\n✓ Check complete!")
-        print(f"  Documents processed: {results['processed']}")
-        print(f"  Items added: {results['items_added']}")
+        log.info("\n✓ Check complete!")
+        log.info(f"  Documents processed: {results['processed']}")
+        log.info(f"  Items added: {results['items_added']}")
         
         if results.get('vendors'):
-            print("\n  By vendor:")
+            log.info("\n  By vendor:")
             for vendor, stats in results['vendors'].items():
-                print(f"    - {vendor}: {stats['files']} files, {stats['items']} items")
+                log.info(f"    - {vendor}: {stats['files']} files, {stats['items']} items")
         
         if results.get('errors'):
-            print("\n  ⚠️ Errors:")
+            log.warning("\n  ⚠️ Errors:")
             for error in results['errors']:
-                print(f"    - {error}")
+                log.warning(f"    - {error}")
     else:
-        print(f"\n✗ Check failed: {results.get('error')}")
+        log.warning(f"\n✗ Check failed: {results.get('error')}")
     
     return results
 
+
+import logging
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s %(name)s %(levelname)s %(message)s')
 
 if __name__ == '__main__':
     # Run a single email check

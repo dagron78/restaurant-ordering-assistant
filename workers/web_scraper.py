@@ -19,6 +19,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from core.config import Config
 from core.database import Database
 from core.ai_engine import GeminiEngine
+import logging
+
+log = logging.getLogger(__name__)
 
 
 class VendorScraper(ABC):
@@ -142,21 +145,21 @@ class VendorScraper(ABC):
             True if session was saved successfully
         """
         if not self._check_playwright():
-            print("Error: Playwright not installed. Run: pip install playwright && playwright install")
+            log.warning("Error: Playwright not installed. Run: pip install playwright && playwright install")
             return False
         
         from playwright.sync_api import sync_playwright
         
         url = login_url or self.base_url
         
-        print(f"\n{'='*50}")
-        print(f"🔐 Session Refresh for {self.vendor_name}")
-        print(f"{'='*50}")
-        print(f"\nOpening browser to: {url}")
-        print("\n⚠️  IMPORTANT:")
-        print(f"   1. Log in to your {self.vendor_name} account")
-        print("   2. Navigate to the main product/ordering page")
-        print("   3. Return here and press Enter when done")
+        log.info(f"\n{'='*50}")
+        log.info(f"🔐 Session Refresh for {self.vendor_name}")
+        log.info(f"{'='*50}")
+        log.info(f"\nOpening browser to: {url}")
+        log.info("\n⚠️  IMPORTANT:")
+        log.info(f"   1. Log in to your {self.vendor_name} account")
+        log.info("   2. Navigate to the main product/ordering page")
+        log.info("   3. Return here and press Enter when done")
         
         try:
             with sync_playwright() as p:
@@ -180,13 +183,13 @@ class VendorScraper(ABC):
                 expires = datetime.now() + timedelta(days=30)
                 self.db.update_vendor_session(vendor['id'], expires)
             
-            print(f"\n✓ Session saved to: {self.session_file}")
-            print("  Session valid for 30 days")
+            log.info(f"\n✓ Session saved to: {self.session_file}")
+            log.info("  Session valid for 30 days")
             
             return True
             
         except Exception as e:
-            print(f"\n✗ Error refreshing session: {e}")
+            log.warning(f"\n✗ Error refreshing session: {e}")
             return False
     
     def _get_browser_context(self, playwright: Any):
@@ -406,7 +409,7 @@ class VendorScraper(ABC):
             return None
         
         if not self.has_valid_session():
-            print(f"⚠️  No valid session for {self.vendor_name}. Run refresh_session() first.")
+            log.warning(f"⚠️  No valid session for {self.vendor_name}. Run refresh_session() first.")
             return None
         
         from playwright.sync_api import sync_playwright
@@ -430,7 +433,7 @@ class VendorScraper(ABC):
                 return result
                 
         except Exception as e:
-            print(f"Error scraping {item_name} from {self.vendor_name}: {e}")
+            log.warning(f"Error scraping {item_name} from {self.vendor_name}: {e}")
             return None
     
     def scrape_all_items(self) -> Dict:
@@ -489,7 +492,7 @@ class VendorScraper(ABC):
                         filename='weekly_scrape', status='failed',
                         items_processed=0,
                         error_message=error)
-                    print(f"  ✗ aborted: {error}")
+                    log.warning(f"  ✗ aborted: {error}")
                     browser.close()
                     return results
                 results['auth'] = 'ok'
@@ -536,16 +539,16 @@ class VendorScraper(ABC):
                             
                             results['items_scraped'] += 1
                             results['prices'].append(price_data)
-                            print(f"  ✓ {item_name}: ${price_data['price']}")
+                            log.info(f"  ✓ {item_name}: ${price_data['price']}")
                         else:
                             results['items_failed'] += 1
                             results['errors'].append(f"{item_name}: Price not found")
-                            print(f"  ✗ {item_name}: Not found")
+                            log.warning(f"  ✗ {item_name}: Not found")
                         
                     except Exception as e:
                         results['items_failed'] += 1
                         results['errors'].append(f"{item_name}: {str(e)}")
-                        print(f"  ✗ {item_name}: Error - {e}")
+                        log.warning(f"  ✗ {item_name}: Error - {e}")
                 
                 browser.close()
             
@@ -652,7 +655,7 @@ class SyscoScraper(VendorScraper):
             return None
             
         except Exception as e:
-            print(f"Error extracting price for {item_name}: {e}")
+            log.warning(f"Error extracting price for {item_name}: {e}")
             return None
 
 
@@ -713,7 +716,7 @@ class USFoodsScraper(VendorScraper):
             return None
             
         except Exception as e:
-            print(f"Error extracting price for {item_name}: {e}")
+            log.warning(f"Error extracting price for {item_name}: {e}")
             return None
 
 
@@ -724,9 +727,9 @@ def run_weekly_scrape() -> Dict:
     Returns:
         Combined results from all scrapers
     """
-    print(f"\n{'='*50}")
-    print(f"🌐 Weekly Vendor Scrape - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"{'='*50}")
+    log.info(f"\n{'='*50}")
+    log.info(f"🌐 Weekly Vendor Scrape - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    log.info(f"{'='*50}")
     
     combined_results = {
         'success': True,
@@ -738,10 +741,10 @@ def run_weekly_scrape() -> Dict:
     scrapers = [SyscoScraper(), USFoodsScraper()]
     
     for scraper in scrapers:
-        print(f"\n📦 Scraping {scraper.vendor_name}...")
+        log.info(f"\n📦 Scraping {scraper.vendor_name}...")
         
         if not scraper.has_valid_session():
-            print("  ⚠️ No valid session. Skipping.")
+            log.warning("  ⚠️ No valid session. Skipping.")
             combined_results['vendors'][scraper.vendor_name] = {
                 'success': False,
                 'error': 'No valid session'
@@ -757,14 +760,18 @@ def run_weekly_scrape() -> Dict:
         if not results.get('success'):
             combined_results['success'] = False
     
-    print(f"\n{'='*50}")
-    print("Scraping complete!")
-    print(f"  Total items updated: {combined_results['total_items']}")
-    print(f"  Total errors: {combined_results['total_errors']}")
-    print(f"{'='*50}")
+    log.info(f"\n{'='*50}")
+    log.info("Scraping complete!")
+    log.info(f"  Total items updated: {combined_results['total_items']}")
+    log.warning(f"  Total errors: {combined_results['total_errors']}")
+    log.info(f"{'='*50}")
     
     return combined_results
 
+
+import logging
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s %(name)s %(levelname)s %(message)s')
 
 if __name__ == '__main__':
     import argparse
