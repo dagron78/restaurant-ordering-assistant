@@ -248,6 +248,17 @@ External re-review (2026-08-21) re-opened F-01 and F-04 with runnable
 repros; both re-fixed on their claiming branches before merge and now
 carry adversarial regression tests.
 
+**Status provenance — a recurring failure mode worth naming.** Four
+findings in this table were marked Fixed based on inspecting the diff
+instead of exercising the behaviour, and every one of them was wrong:
+F-01 (fix reached one of two ranking sites; issue #9), F-04 (floor-half
+threshold was a near-no-op on the real catalog), F-39 (one of three
+parts addressed), F-24 (desktop widget keys only; the default card view
+kept old quantities until the Phase 1 runtime walkthrough caught it).
+Rule going forward: a finding is Fixed only when a test or a runtime
+observation exercises the specific failure axis — diff inspection
+establishes intent, not outcome.
+
 | Finding | Status |
 |---------|--------|
 | F-01 | Fixed in #3; **re-opened by review** (insertion-order clock broke backfills) → date-first ranking + reversed/backfill tests, fixed in #3 (`f6ad58d`); **re-opened again as issue #9** — the fix reached `get_latest_prices()` only; the `latest` CTE in `get_all_items_with_prices()` was born later (#5's F-32 rewrite) and kept the old ordering → CTE fixed + listing-level regression tests (PR #10); **now true by construction**: single `LATEST_PRICE_RANK_ORDER` constant feeds both queries, adversarial fixtures parametrized over both entry points plus an agreement test |
@@ -256,7 +267,8 @@ carry adversarial regression tests.
 | F-04 | Fixed in #4; **re-opened by review** (floor-half threshold was near no-op; grade tokens dropped) → matcher rewritten per repro matrix, fixed in #4 (`ec4f003`) |
 | F-05 | Fixed in #4 |
 | F-06 | Fixed in #4 (PDF via inline bytes; seen only on full success) |
-| F-07 / F-24 | Fixed in #5 |
+| F-07 | Fixed in #5 |
+| F-24 | **Partially** fixed in #5 (desktop keys only — card view's `qty_mobile_*` kept old quantities; status was wrongly Fixed from the diff, see provenance note) → fully fixed in Phase 1 (#15) via form-version key rotation, browser-verified |
 | F-08 | Fixed in #3 (defaults gemini-2.5-*, env-overridable); SDK migration still open below |
 | F-09 | Fixed in #4; hardened further in #5 (parseaddr header parsing, finding E) |
 | F-10 | Fixed in #5 (APP_PASSWORD gate); documented no-lockout trade-off |
