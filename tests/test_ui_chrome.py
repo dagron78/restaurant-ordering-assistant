@@ -14,8 +14,9 @@ class TestSingleProductName:
     def test_login_and_home_use_one_name(self):
         gate = (APP / "components" / "auth_gate.py").read_text()
         home = (APP / "Home.py").read_text()
-        assert "Kitchen Order Guide" in gate
-        assert "Restaurant Ordering Assistant" not in gate
+        for src in (gate, home):
+            assert "Kitchen Order Guide" in src
+            assert "Restaurant Ordering Assistant" not in src
         # user-facing surfaces only (docstrings may keep historical names)
         for f in [APP / "Home.py", APP / "components" / "auth_gate.py"]:
             assert "Restaurant Ordering Assistant" not in f.read_text(), f
