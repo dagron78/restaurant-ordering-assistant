@@ -260,7 +260,8 @@ carry adversarial regression tests.
 | F-08 | Fixed in #3 (defaults gemini-2.5-*, env-overridable); SDK migration still open below |
 | F-09 | Fixed in #4; hardened further in #5 (parseaddr header parsing, finding E) |
 | F-10 | Fixed in #5 (APP_PASSWORD gate); documented no-lockout trade-off |
-| F-11 / F-36 / F-39 | Fixed in #4 |
+| F-11 / F-36 | Fixed in #4 |
+| F-39 | **Partially fixed in #4** — only the Gmail "less secure apps" advice. The `.python-version` 3.10.13 vs Dockerfile 3.11 mismatch stayed open and caused issue #13 (Phase 1 ran on a Python 3.9 venv that nothing objected to); resolved by making 3.11 authoritative everywhere. The `reportlab`-for-a-stub-PDF part is Phase 5 and still open. |
 | F-12 | Fixed in #5 (credentials removed entirely) |
 | F-14 | Fixed in #5 (deterministic validation; per-row extraction coercion added post-review) |
 | F-15 | Fixed in #5 (HTML scrubbed + capped pre-AI) |
