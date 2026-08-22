@@ -56,6 +56,24 @@ jobs:
           name: coverage-report
           path: coverage.xml
 
+  warnings:
+    name: Warnings as errors
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies (locked)
+        run: |
+          pip install -r requirements-lock.txt
+
+      - name: Pytest with warnings as errors (-rs shows skips)
+        run: pytest -rs -W error::DeprecationWarning -W error::FutureWarning -p no:cacheprovider
+
   docker:
     name: Docker build
     runs-on: ubuntu-latest

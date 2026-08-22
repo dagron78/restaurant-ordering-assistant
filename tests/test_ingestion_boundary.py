@@ -53,8 +53,8 @@ class TestParseDocumentRowResilience:
             {'item_name': 'Currency Sign', 'price': '$24.50'},
             {'item_name': 'Also Good', 'price': 3.5},
         ])
-        monkeypatch.setattr(engine, '_call_with_retry',
-                            lambda model, content, generation_config=None: raw)
+        monkeypatch.setattr(engine, '_send_to_model',
+                            lambda model_name, contents: raw)
 
         items = engine.parse_document(_png(tmp_path))
 
@@ -63,15 +63,15 @@ class TestParseDocumentRowResilience:
 
     def test_non_dict_rows_ignored(self, engine, monkeypatch, tmp_path):
         raw = json.dumps([{'item_name': 'Fine', 'price': 1.0}, 'garbage', 42])
-        monkeypatch.setattr(engine, '_call_with_retry',
-                            lambda model, content, generation_config=None: raw)
+        monkeypatch.setattr(engine, '_send_to_model',
+                            lambda model_name, contents: raw)
 
         items = engine.parse_document(_png(tmp_path))
         assert [i['item_name'] for i in items] == ['Fine']
 
     def test_non_array_response_discarded(self, engine, monkeypatch, tmp_path):
-        monkeypatch.setattr(engine, '_call_with_retry',
-                            lambda model, content, generation_config=None: '{"a": 1}')
+        monkeypatch.setattr(engine, '_send_to_model',
+                            lambda model_name, contents: '{"a": 1}')
         assert engine.parse_document(_png(tmp_path)) == []
 
 

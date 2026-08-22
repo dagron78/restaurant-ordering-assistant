@@ -5,6 +5,7 @@ Streamlit-based web interface for managing restaurant ordering.
 Run with: streamlit run app/main.py
 """
 
+
 import base64
 import sys
 from pathlib import Path
@@ -17,6 +18,10 @@ import streamlit as st
 from core.config import Config
 from core.database import Database
 from app.components.auth_gate import require_login
+
+import logging
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s %(name)s %(levelname)s %(message)s')
 
 # Page configuration
 st.set_page_config(
@@ -173,7 +178,7 @@ with col1:
 with col2:
     st.markdown("**Quick Actions**")
     
-    if st.button("🔄 Initialize Database", use_container_width=True):
+    if st.button("🔄 Initialize Database", width='stretch'):
         try:
             db.init_database()
             st.success("Database initialized!")
@@ -181,10 +186,10 @@ with col2:
         except Exception as e:
             st.error(f"Error: {e}")
     
-    if st.button("📧 Check Email Now", use_container_width=True):
+    if st.button("📧 Check Email Now", width='stretch'):
         st.info("Go to Settings > System to run email check")
     
-    if st.button("📄 View Documentation", use_container_width=True):
+    if st.button("📄 View Documentation", width='stretch'):
         st.markdown("""
         **Getting Started:**
         1. Copy `.env.example` to `.env` and add your API keys

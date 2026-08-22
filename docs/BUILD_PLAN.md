@@ -252,6 +252,16 @@ must work with no network.
 
 ## Phase 6 · Operational maturity
 
+> **STATUS: DONE** — `phase/6-operational-maturity`.
+> google-genai migration (single `_send_to_model` wire seam; golden parser tests
+> replay unchanged); 65 prints → module loggers with timestamped entrypoints;
+> ceilings + committed `requirements-lock.txt` (verified by clean-room venv);
+> `use_container_width` → `width='stretch'` (0 sites remain); F-37 remainder
+> retired (`get_categories`, `get_orders_with_savings`, `update_item`,
+> `extract_vendor_from_email`); CI `warnings` job runs the suite with
+> `-W error::DeprecationWarning -W error::FutureWarning` and `-rs` so skips
+> are always visible.
+
 Nothing here changes behaviour, and all of it makes the next change safer.
 
 - **`google-generativeai` → `google-genai`.** Support has ended; the deprecation

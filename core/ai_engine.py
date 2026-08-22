@@ -10,13 +10,19 @@ Handles all AI-powered operations:
 
 import json
 import time
-from typing import Optional, List, Dict, Any, Union
+from typing import List, Dict, Union
 from pathlib import Path
 
-import google.generativeai as genai
+from functools import partial
+
+from google import genai
+from google.genai import types as gtypes
 import PIL.Image
 
 from .config import Config
+import logging
+
+log = logging.getLogger(__name__)
 
 
 class GeminiEngine:
@@ -30,55 +36,48 @@ class GeminiEngine:
         if not Config.GOOGLE_API_KEY:
             raise ValueError("GOOGLE_API_KEY not configured. Check your .env file.")
         
-        genai.configure(api_key=Config.GOOGLE_API_KEY)
-        
-        # Use Flash for speed, Pro for complex reasoning.
-        # gemini-1.5-* are retired; default to current generation and
-        # allow override via environment variables.
-        self.model_flash = genai.GenerativeModel(Config.GEMINI_MODEL_FLASH)
-        self.model_pro = genai.GenerativeModel(Config.GEMINI_MODEL_PRO)
+        self._client = genai.Client(api_key=Config.GOOGLE_API_KEY)
+
+        # Use Flash for speed, Pro for complex reasoning (gemini-2.5 default).
+        self.flash_model = Config.GEMINI_MODEL_FLASH
+        self.pro_model = Config.GEMINI_MODEL_PRO
         
         # Retry configuration
         self.max_retries = 3
         self.retry_delay = 2
     
-    def _call_with_retry(self, model: Any, content: Any, 
-                         generation_config: dict = None) -> str:
+    def _send_to_model(self, model_name: str, contents) -> str:
+        """Single seam to the wire: tests stub THIS method."""
+        response = self._client.models.generate_content(
+            model=model_name,
+            contents=contents,
+            config=gtypes.GenerateContentConfig(temperature=0.0),
+        )
+        return response.text
+
+    def _call_with_retry(self, send):
         """
-        Call Gemini API with exponential backoff retry.
-        
+        Run send() with exponential backoff (delay * 2**attempt).
+
         Args:
-            model: Gemini model instance
-            content: Content to send (text, image, or list)
-            generation_config: Optional generation configuration
-            
-        Returns:
-            Response text from Gemini
+            send: zero-arg callable returning response text. Callers close
+                over their model name and contents via _send_to_model.
         """
         last_error = None
-        
+
         for attempt in range(self.max_retries):
             try:
-                if generation_config:
-                    response = model.generate_content(
-                        content,
-                        generation_config=generation_config
-                    )
-                else:
-                    response = model.generate_content(content)
-                
-                return response.text
-                
+                return send()
             except Exception as e:
                 last_error = e
                 if attempt < self.max_retries - 1:
-                    # Exponential backoff: 2s, 4s, 8s with default retry_delay=2
                     wait_time = self.retry_delay * (2 ** attempt)
-                    print(f"API call failed, retrying in {wait_time}s: {e}")
+                    log.warning(f"API call failed, retrying in {wait_time}s: {e}")
                     time.sleep(wait_time)
-        
-        raise Exception(f"API call failed after {self.max_retries} attempts: {last_error}")
-    
+
+        raise Exception(
+            f"API call failed after {self.max_retries} attempts: {last_error}")
+
     def _clean_json_response(self, text: str) -> str:
         """
         Clean markdown formatting from JSON response.
@@ -146,13 +145,15 @@ class GeminiEngine:
         # PDFs cannot be opened with PIL; send raw bytes with a MIME type.
         # Gemini accepts inline parts for both images and PDFs.
         if file_path.suffix.lower() == '.pdf':
-            document = [{'mime_type': 'application/pdf',
-                         'data': file_path.read_bytes()}]
+            document = [gtypes.Part.from_bytes(
+                data=file_path.read_bytes(),
+                mime_type='application/pdf')]
         else:
             document = [PIL.Image.open(file_path)]
         
         # Use Pro model for better OCR accuracy
-        response = self._call_with_retry(self.model_pro, [prompt] + document)
+        send = partial(self._send_to_model, self.pro_model, [prompt] + document)
+        response = self._call_with_retry(send)
         
         # Parse JSON
         clean_json = self._clean_json_response(response)
@@ -160,12 +161,12 @@ class GeminiEngine:
         try:
             items = json.loads(clean_json)
         except json.JSONDecodeError as e:
-            print(f"JSON parse error: {e}")
-            print(f"Raw response: {clean_json[:500]}")
+            log.warning(f"JSON parse error: {e}")
+            log.info(f"Raw response: {clean_json[:500]}")
             return []
         
         if not isinstance(items, list):
-            print("Model response was not a JSON array; discarding")
+            log.info("Model response was not a JSON array; discarding")
             return []
         
         # Per-row coercion: one malformed line ("N/A", "$24.50") must cost
@@ -178,7 +179,7 @@ class GeminiEngine:
                 name = str(item['item_name']).strip()
                 price = float(item['price'])
             except (KeyError, TypeError, ValueError) as e:
-                print(f"Skipping malformed extracted row ({e}): {str(item)[:120]}")
+                log.warning(f"Skipping malformed extracted row ({e}): {str(item)[:120]}")
                 continue
             
             validated_items.append({
@@ -190,7 +191,7 @@ class GeminiEngine:
         
         dropped = len(items) - len(validated_items)
         if dropped:
-            print(f"Dropped {dropped} of {len(items)} rows during extraction cleanup")
+            log.info(f"Dropped {dropped} of {len(items)} rows during extraction cleanup")
         
         return validated_items
     
@@ -263,18 +264,19 @@ class GeminiEngine:
         - Return ONLY valid JSON array, no additional text.
         """
         
-        response = self._call_with_retry(self.model_flash, prompt)
+        send = partial(self._send_to_model, self.flash_model, prompt)
+        response = self._call_with_retry(send)
         if capture_raw is not None:
             try:
                 capture_raw(response)
             except Exception as e:
-                print(f"capture_raw callback failed (ignored): {e}")
+                log.warning(f"capture_raw callback failed (ignored): {e}")
         clean_json = self._clean_json_response(response)
         
         try:
             rules = json.loads(clean_json)
         except json.JSONDecodeError:
-            print(f"Failed to parse preferences: {clean_json[:200]}")
+            log.warning(f"Failed to parse preferences: {clean_json[:200]}")
             return []
         
         if not isinstance(rules, list):
@@ -338,7 +340,8 @@ class GeminiEngine:
         Return ONLY valid JSON, no additional text.
         """
         
-        response = self._call_with_retry(self.model_flash, prompt)
+        send = partial(self._send_to_model, self.flash_model, prompt)
+        response = self._call_with_retry(send)
         clean_json = self._clean_json_response(response)
         
         try:
@@ -353,45 +356,11 @@ class GeminiEngine:
                 'notes': 'Failed to analyze HTML, using generic selectors'
             }
     
-    def extract_vendor_from_email(self, email_from: str, 
-                                   email_subject: str) -> Optional[str]:
-        """
-        Determine vendor name from email metadata.
-        
-        Args:
-            email_from: Email sender address
-            email_subject: Email subject line
-            
-        Returns:
-            Vendor name or None
-        """
-        # Check known domains first
-        email_lower = email_from.lower()
-        
-        if 'sysco' in email_lower:
-            return 'Sysco'
-        if 'usfoods' in email_lower:
-            return 'US Foods'
-        
-        # Use AI for unknown vendors
-        prompt = f"""
-        Determine the vendor/supplier name from this email metadata.
-        
-        From: {email_from}
-        Subject: {email_subject}
-        
-        Return ONLY the vendor name (e.g., "Sysco", "US Foods", "Restaurant Depot").
-        If unknown, return "Unknown".
-        """
-        
-        response = self._call_with_retry(self.model_flash, prompt)
-        return response.strip() if response else None
-    
     # Sanity bounds for a single price line - anything outside is treated
     # as an extraction error rather than reality.
     MIN_SANE_PRICE = 0.01
     MAX_SANE_PRICE = 100_000.0
-    
+
     def validate_extracted_prices(self, prices: List[Dict]) -> List[Dict]:
         """
         Deterministically validate extracted price lines.
@@ -432,7 +401,7 @@ class GeminiEngine:
                 continue
             
             if not (self.MIN_SANE_PRICE <= price <= self.MAX_SANE_PRICE):
-                print(f"Dropping {name!r}: price {price} outside sane bounds")
+                log.warning(f"Dropping {name!r}: price {price} outside sane bounds")
                 continue
             
             unit = str(raw.get('unit') or 'Each').strip() or 'Each'
@@ -453,6 +422,6 @@ class GeminiEngine:
         
         dropped = len(prices) - len(validated)
         if dropped:
-            print(f"Price validation dropped {dropped} of {len(prices)} extracted rows")
+            log.info(f"Price validation dropped {dropped} of {len(prices)} extracted rows")
         
         return validated

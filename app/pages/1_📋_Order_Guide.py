@@ -43,12 +43,12 @@ db = Database()
 # Refresh button
 col1, col2, col3 = st.columns([1, 1, 4])
 with col1:
-    if st.button("🔄 Refresh", use_container_width=True):
+    if st.button("🔄 Refresh", width='stretch'):
         st.cache_data.clear()
         st.rerun()
 
 with col2:
-    if st.button("📥 Load Preferences", use_container_width=True):
+    if st.button("📥 Load Preferences", width='stretch'):
         engine.load_preferences()
         st.success("Preferences loaded!")
 
@@ -334,7 +334,7 @@ if (generate_summary or save_order) and order_items:
             'total_display': 'Total',
             'savings_display': 'Net vs Alternative'
         }),
-        use_container_width=True,
+        width='stretch',
         hide_index=True
     )
     

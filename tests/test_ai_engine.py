@@ -78,8 +78,8 @@ class TestParseDocument:
         ])
         captured = {}
         monkeypatch.setattr(
-            engine, '_call_with_retry',
-            lambda model, content, generation_config=None: captured.update(content=content) or raw
+            engine, '_send_to_model',
+            lambda model_name, contents: captured.update(content=contents) or raw
         )
 
         items = engine.parse_document(self._png(tmp_path), vendor_hint='Sysco')
@@ -96,40 +96,63 @@ class TestParseDocument:
         pdf_path = tmp_path / 'price_list.pdf'
         pdf_path.write_bytes(pdf_bytes)
 
+        from google.genai import types as gtypes
         captured = {}
         monkeypatch.setattr(
-            engine, '_call_with_retry',
-            lambda model, content, generation_config=None: captured.update(content=content) or '[]'
+            engine, '_send_to_model',
+            lambda model_name, contents: captured.update(content=contents) or '[]'
         )
 
         items = engine.parse_document(pdf_path)
 
         assert items == []
         part = captured['content'][1]
-        assert part['mime_type'] == 'application/pdf'
-        assert part['data'] == pdf_bytes
+        assert isinstance(part, gtypes.Part)
+        assert part.inline_data.mime_type == 'application/pdf'
+        assert part.inline_data.data == pdf_bytes
 
     def test_missing_file_raises(self, engine, tmp_path):
         with pytest.raises(FileNotFoundError):
             engine.parse_document(tmp_path / 'ghost.png')
 
     def test_invalid_json_returns_empty_list(self, engine, monkeypatch, tmp_path):
-        monkeypatch.setattr(engine, '_call_with_retry',
-                            lambda model, content, generation_config=None: 'not json at all')
+        monkeypatch.setattr(engine, '_send_to_model',
+                            lambda model_name, contents: 'not json at all')
         assert engine.parse_document(self._png(tmp_path)) == []
 
 
 class TestRetryBehaviour:
-    def test_retries_then_succeeds(self, engine, no_sleep):
-        model = FakeModel(fail_times=2, responses=[_Response('ok')])
-        assert engine._call_with_retry(model, 'prompt') == 'ok'
-        assert no_sleep == [2, 4]  # exponential backoff: delay * 2**attempt
+    def _engine_with_sleep(self, monkeypatch):
+        sleeps = []
+        monkeypatch.setattr(ai_engine_module.time, 'sleep',
+                            lambda s: sleeps.append(s))
+        return sleeps
 
-    def test_raises_after_max_retries(self, engine, no_sleep):
-        model = FakeModel(fail_times=99)
-        with pytest.raises(Exception, match='3 attempts'):
-            engine._call_with_retry(model, 'prompt')
-        assert len(model.calls) == 3
+    def test_retries_then_succeeds(self, engine, monkeypatch):
+        sleeps = self._engine_with_sleep(monkeypatch)
+        state = {"calls": 0}
+
+        def send():
+            state["calls"] += 1
+            if state["calls"] < 3:
+                raise RuntimeError("simulated outage")
+            return "ok"
+
+        assert engine._call_with_retry(send) == "ok"
+        assert state["calls"] == 3
+        assert sleeps == [2, 4]      # exponential backoff: delay * 2**attempt
+
+    def test_raises_after_max_retries(self, engine, monkeypatch):
+        self._engine_with_sleep(monkeypatch)
+        state = {"calls": 0}
+
+        def send():
+            state["calls"] += 1
+            raise RuntimeError("simulated outage")
+
+        with pytest.raises(Exception, match="3 attempts"):
+            engine._call_with_retry(send)
+        assert state["calls"] == 3
 
 
 class TestValidateExtractedPrices:

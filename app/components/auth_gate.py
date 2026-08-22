@@ -49,7 +49,7 @@ def require_login() -> bool:
     
     with st.form("login_form", clear_on_submit=False):
         candidate = st.text_input("Password", type="password")
-        submitted = st.form_submit_button("Sign in", type="primary", use_container_width=True)
+        submitted = st.form_submit_button("Sign in", type="primary", width='stretch')
         
         if submitted:
             if password_matches(candidate, expected):

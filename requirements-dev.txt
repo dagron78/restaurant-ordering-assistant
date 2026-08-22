@@ -2,10 +2,12 @@
 # Install on top of requirements.txt:
 #   pip install -r requirements.txt -r requirements-dev.txt
 
-# Testing (kept here so runtime images stay slim)
-pytest>=7.4.0
-pytest-cov>=4.1.0
+# Testing
+pytest>=7.4,<9
+pytest-cov>=4.1,<7
 
 # Linting
-ruff>=0.4.0
-pypdf
+ruff>=0.4
+
+# PDF text round-trip verification (test_exports)
+pypdf>=4.0

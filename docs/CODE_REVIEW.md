@@ -286,15 +286,14 @@ establishes intent, not outcome.
 | F-28 | Fixed in #5 |
 | F-30 | Fixed in #5; ingestion no longer auto-creates items (post-review hardening) |
 | F-32 | Fixed in #5 (single windowed query; query-count test) |
-| F-33 | Open (dependency ceilings/lockfile) |
+| F-33 | Fixed in Phase 6: every requirement ceilinged, committed `requirements-lock.txt` (clean-room venv verified), Streamlit floor raised to 1.49 and the `use_container_width` deprecation fixed at its 23 call sites rather than pinned away |
 | F-34 / F-35 | Fixed in Phase 4 (issue #24). Positive session probe (fail-closed: signed-in marker required; login-form absence is never auth) gates every scrape and re-probes on cadence; mid-scrape lapse keeps fetched rows + records partial with error. Refresh docs now say workstation-only with concrete paths; in-container instructions removed. Citations: tests/test_session_gate.py |
-| F-37 | Partially: `_parse_price` deduped in #4; `get_max_price_for_item` retired in Phase 2 (max is no longer any basis); remaining dead methods still open |
-| F-38 | Open (logging migration off print()) |
+| F-37 | Mostly closed: `_parse_price` deduped (#4); retired across phases — `get_max_price_for_item` + `get_vendor_config` (#19/#5), `GeminiEngine.generate_recommendation` (Phase 3), `get_categories` / `get_orders_with_savings` / `update_item` / `extract_vendor_from_email` (Phase 6). Grep for each returns only its definition or nothing |
+| F-38 | Fixed in Phase 6: all 65 print() calls converted to module loggers (warning+ inside except blocks); timestamped basicConfig at every entrypoint; CI `warnings` job runs the suite with Deprecation/Future warnings as errors |
 | F-40 | Fixed in #5 (non-root container, SCRAPE_DAY guard, scrape delay, safe upload names) |
 | Post-review A/B/C/D/E | All fixed as noted above |
 
-Still genuinely open: **F-16 (UI tests),
-F-33, F-34/F-35
+Still genuinely open: **F-16 (UI tests), F-34/F-35
 (remainder), F-38**, and the `google-generativeai` → `google-genai` SDK
 migration (deprecation warning fires on every test run).
 

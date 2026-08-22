@@ -6,6 +6,9 @@ requires-python = ">=3.11"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "live: requires a valid GOOGLE_API_KEY and network; skipped by default",
+]
 filterwarnings = [
     # The google.generativeai SDK is deprecated upstream; migrating to
     # google-genai is tracked separately - don't fail tests over it.

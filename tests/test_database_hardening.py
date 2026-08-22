@@ -198,7 +198,8 @@ class TestSingleQueryItemPrices:
 
     def test_inactive_items_excluded(self, populated):
         item = populated.get_item(name='Milk')
-        populated.update_item(item['id'], is_active=False)
+        with populated.get_connection() as conn:
+            conn.execute('UPDATE items SET is_active = 0 WHERE id = ?', (item['id'],))
 
         names = [i['name'] for i in populated.get_all_items_with_prices()]
         assert 'Milk' not in names

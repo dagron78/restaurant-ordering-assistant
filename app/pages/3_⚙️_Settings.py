@@ -76,7 +76,7 @@ with tab1:
         )
         
         if uploaded_file:
-            st.image(uploaded_file, caption="Document to Process", use_container_width=True)
+            st.image(uploaded_file, caption="Document to Process", width='stretch')
             
             if st.button("🔍 Extract Items", type="primary"):
                 with st.spinner("AI is analyzing the document..."):
@@ -118,7 +118,7 @@ with tab1:
             
             edited_df = st.data_editor(
                 df,
-                use_container_width=True,
+                width='stretch',
                 num_rows="dynamic",
                 column_config={
                     "item_name": st.column_config.TextColumn("Item Name", required=True),
@@ -131,7 +131,7 @@ with tab1:
             col_a, col_b = st.columns(2)
             
             with col_a:
-                if st.button("✅ Save All Items", type="primary", use_container_width=True):
+                if st.button("✅ Save All Items", type="primary", width='stretch'):
                     try:
                         # Convert back to list of dicts
                         items_to_save = edited_df.to_dict('records')
@@ -143,7 +143,7 @@ with tab1:
                         st.error(f"Error saving items: {e}")
             
             with col_b:
-                if st.button("🗑️ Clear", use_container_width=True):
+                if st.button("🗑️ Clear", width='stretch'):
                     del st.session_state['extracted_items']
                     st.rerun()
                     
@@ -349,7 +349,7 @@ with tab3:
     with col2:
         st.subheader("🤖 Manual Actions")
         
-        if st.button("📧 Run Email Check Now", use_container_width=True):
+        if st.button("📧 Run Email Check Now", width='stretch'):
             with st.spinner("Checking email..."):
                 try:
                     from workers.email_monitor import run_email_check
@@ -364,7 +364,7 @@ with tab3:
                 except Exception as e:
                     st.error(f"Error: {e}")
         
-        if st.button("🌐 Run Web Scrape Now", use_container_width=True):
+        if st.button("🌐 Run Web Scrape Now", width='stretch'):
             st.warning("Web scraping may take several minutes...")
             try:
                 from workers.web_scraper import run_weekly_scrape
@@ -391,14 +391,14 @@ with tab3:
         
         st.subheader("🗄️ Database")
         
-        if st.button("🔄 Reinitialize Database", use_container_width=True):
+        if st.button("🔄 Reinitialize Database", width='stretch'):
             try:
                 db.init_database()
                 st.success("Database reinitialized!")
             except Exception as e:
                 st.error(f"Error: {e}")
         
-        if st.button("📊 Add Sample Data", use_container_width=True):
+        if st.button("📊 Add Sample Data", width='stretch'):
             st.info("""
             To add sample data:
             ```
@@ -419,7 +419,7 @@ with tab3:
         {"Setting": "Database Directory", "Status": "✅ Exists" if validation['database_dir'] else "❌ Missing"},
     ]
     
-    st.dataframe(pd.DataFrame(status_data), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(status_data), width='stretch', hide_index=True)
     
     if not validation['all_valid']:
         st.warning("Some configuration is missing. Copy `.env.example` to `.env` and fill in your credentials.")
@@ -447,7 +447,7 @@ with tab4:
                     'default_unit': 'Unit',
                     'is_active': 'Active'
                 }),
-                use_container_width=True,
+                width='stretch',
                 hide_index=True
             )
             
@@ -473,7 +473,7 @@ with tab4:
                     'email_domain': 'Email Domain',
                     'scrape_enabled': 'Scraping Enabled'
                 }),
-                use_container_width=True,
+                width='stretch',
                 hide_index=True
             )
         else:
@@ -503,7 +503,7 @@ with tab4:
                 'items_processed': 'Items',
                 'error_message': 'Error'
             }),
-            use_container_width=True,
+            width='stretch',
             hide_index=True
         )
     else:
