@@ -241,6 +241,52 @@ reset, matching what `init_db.py --reset` already asks for on the CLI.
 
 ---
 
+## Status — 2026-08-22 (post-merge)
+
+Stack #3/#4/#5 merged to master at `cfc7c2e`; 145 tests, CI green.
+External re-review (2026-08-21) re-opened F-01 and F-04 with runnable
+repros; both re-fixed on their claiming branches before merge and now
+carry adversarial regression tests.
+
+| Finding | Status |
+|---------|--------|
+| F-01 | Fixed in #3; **re-opened by review** (insertion-order clock broke backfills) → date-first ranking + reversed/backfill tests, fixed in #3 (`f6ad58d`) |
+| F-02 | Fixed in #3 |
+| F-03 / F-13 | Fixed in #3 |
+| F-04 | Fixed in #4; **re-opened by review** (floor-half threshold was near no-op; grade tokens dropped) → matcher rewritten per repro matrix, fixed in #4 (`ec4f003`) |
+| F-05 | Fixed in #4 |
+| F-06 | Fixed in #4 (PDF via inline bytes; seen only on full success) |
+| F-07 / F-24 | Fixed in #5 |
+| F-08 | Fixed in #3 (defaults gemini-2.5-*, env-overridable); SDK migration still open below |
+| F-09 | Fixed in #4; hardened further in #5 (parseaddr header parsing, finding E) |
+| F-10 | Fixed in #5 (APP_PASSWORD gate); documented no-lockout trade-off |
+| F-11 / F-36 / F-39 | Fixed in #4 |
+| F-12 | Fixed in #5 (credentials removed entirely) |
+| F-14 | Fixed in #5 (deterministic validation; per-row extraction coercion added post-review) |
+| F-15 | Fixed in #5 (HTML scrubbed + capped pre-AI) |
+| F-16 | Partially: 12→145 tests incl. UI-free coverage of core/workers; Streamlit UI tests still open |
+| F-17 / F-18 | Open (preference-engine rework) |
+| F-19 / F-21 / F-22 | Open (metric semantics — needs a product decision on what "savings" should mean) |
+| F-20 / F-29 / F-31 | Fixed in #4 |
+| F-23 | Fixed in #3 |
+| F-25 / F-26 / F-27 | F-25/F-27 fixed in #5; **F-26 open** (preferences text-area session state) |
+| F-28 | Fixed in #5 |
+| F-30 | Fixed in #5; ingestion no longer auto-creates items (post-review hardening) |
+| F-32 | Fixed in #5 (single windowed query; query-count test) |
+| F-33 | Open (dependency ceilings/lockfile) |
+| F-34 / F-35 | Open (session validity check; Docker session refresh) |
+| F-37 | Partially: `_parse_price` deduped in #4; dead public methods remain |
+| F-38 | Open (logging migration off print()) |
+| F-40 | Fixed in #5 (non-root container, SCRAPE_DAY guard, scrape delay, safe upload names) |
+| Post-review A/B/C/D/E | All fixed as noted above |
+
+Still genuinely open: **F-16 (UI tests), F-17/F-18 (preference engine),
+F-19/F-21/F-22 (savings semantics), F-26, F-33, F-34/F-35, F-37
+(remainder), F-38**, and the `google-generativeai` → `google-genai` SDK
+migration (deprecation warning fires on every test run).
+
+---
+
 ## Suggested order
 
 1. **Stop the wrong recommendations** — F-01, F-04, F-05. Until these land, the core output can be confidently wrong, which is worse than being unavailable.
