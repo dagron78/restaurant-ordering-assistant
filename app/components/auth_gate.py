@@ -89,14 +89,14 @@ def render_login():
     unauthenticated — every path ends in st.stop() or st.rerun(). The
     pre-Phase-A guard returned silently on re-entry, letting the router
     fall through and render the whole app to a signed-out session: the
-    bypass the Phase A regression test pins, exposed wide open by
-    first-run, where any submit rerun reached the dashboard with no
-    password configured at all.
-    """
-    if st.session_state.get("_login_rendered"):
-        st.stop()                     # drawn earlier: never fall through
-    st.session_state["_login_rendered"] = True
+    bypass the Phase A regression tests pin.
 
+    No re-entry guard here on purpose: a form submit reruns the whole
+    script, and the guard would stop BEFORE the form's handler could run
+    — making setup and sign-in impossible. Exactly one call per script
+    run is guaranteed by the router (unauthenticated sessions never
+    reach navigation, and navigation executes one page).
+    """
     db = Database()
     if not auth.is_configured(db=db):
         from app.components.first_run import render_setup
