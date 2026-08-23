@@ -496,7 +496,7 @@ with tab4:
         st.info("No vendors yet. Add one below or promote from quarantine.")
 
     st.markdown("**Add a vendor**")
-    with st.form("add_vendor_form", clear_on_input=True):
+    with st.form("add_vendor_form", clear_on_submit=True):
         v_name = st.text_input("Vendor name*")
         v_domain = st.text_input(
             "Email domain",
