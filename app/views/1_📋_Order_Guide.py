@@ -84,21 +84,20 @@ if stats['alerts']:
             st.warning(alert)
 
 # Summary metrics
-col1, col2, col3, col4, col5, col6 = st.columns(6)
+col1, col2, col3, col4 = st.columns(4)
 
 with col1:
     st.metric("Total Items", stats['total_items'])
 with col2:
     st.metric("With Prices", stats['items_with_prices'])
+    st.metric("With Prices", stats['items_with_prices'])
 with col3:
-    st.metric("🟢 Deals", stats['deals_count'])
+    deals_spikes = stats['deals_count'] + stats['spikes_count']
+    icon = "🟢" if stats['deals_count'] >= stats['spikes_count'] else "🔴"
+    st.metric(f"{icon} Deals / Spikes", f"{stats['deals_count']} / {stats['spikes_count']}")
 with col4:
-    st.metric("🔴 Spikes", stats['spikes_count'])
-with col5:
-    st.metric("⚠️ Alerts", stats['alert_count'])
-with col6:
     potential_savings = stats.get('potential_savings_vs_max', 0)
-    st.metric("💰 Potential Savings", f"${potential_savings:.2f}/unit")
+    st.metric("💰 Potential Savings", f"${potential_savings:,.2f}")
 
 st.divider()
 
