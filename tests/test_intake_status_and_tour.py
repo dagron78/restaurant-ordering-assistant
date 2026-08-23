@@ -3,7 +3,6 @@
 These tests exercise rendered output, not source text.
 """
 
-import json
 import pathlib
 
 import pytest
