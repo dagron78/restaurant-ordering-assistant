@@ -81,7 +81,9 @@ class TestTourRendersFourSteps:
         db.add_item("Sample Item", "Test", "Each")
 
         original_db = Config.DATABASE_PATH
+        original_pw = Config.APP_PASSWORD
         Config.DATABASE_PATH = db.db_path
+        Config.APP_PASSWORD = ""
         try:
             tour_path = str(pathlib.Path(__file__).parent.parent /
                             "app" / "views" / "4_📖_How_This_Works.py")
@@ -101,3 +103,4 @@ class TestTourRendersFourSteps:
                     f"step {step}: '{want}' not found in {titles}"
         finally:
             Config.DATABASE_PATH = original_db
+            Config.APP_PASSWORD = original_pw
