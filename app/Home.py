@@ -133,7 +133,8 @@ def home_dashboard():
 load_css()
 
 if not is_authenticated():
-    render_login()          # draws gate + marker; stops execution
+    render_login()   # never returns while unauthenticated; belt below anyway
+    st.stop()
 
 pages = [
     st.Page(home_dashboard, title="Home", icon="🏠", default=True),

@@ -83,9 +83,18 @@ def require_admin() -> bool:
 
 
 def render_login():
-    """Sign-in screen. Routes to first-run setup while unconfigured."""
+    """Sign-in screen. Routes to first-run setup while unconfigured.
+
+    INVARIANT: this function NEVER returns while the session is
+    unauthenticated — every path ends in st.stop() or st.rerun(). The
+    pre-Phase-A guard returned silently on re-entry, letting the router
+    fall through and render the whole app to a signed-out session: the
+    bypass the Phase A regression test pins, exposed wide open by
+    first-run, where any submit rerun reached the dashboard with no
+    password configured at all.
+    """
     if st.session_state.get("_login_rendered"):
-        return                                    # already drawn this run
+        st.stop()                     # drawn earlier: never fall through
     st.session_state["_login_rendered"] = True
 
     db = Database()
@@ -93,7 +102,7 @@ def render_login():
         from app.components.first_run import render_setup
 
         render_setup(db=db)                       # fail closed into setup
-        return
+        st.stop()
 
     # Gated mode: emit the sidebar-hiding marker ONLY when we are actually
     # demanding sign-in. A plain div with a data attribute survives

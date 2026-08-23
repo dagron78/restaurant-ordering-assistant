@@ -118,6 +118,38 @@ class TestRoleSplit:
                        for s in at.subheader)
 
 
+class TestLoginRenderInvariant:
+    """render_login() must NEVER return while the session is signed out.
+
+    The pre-Phase-A guard returned silently on re-entry (the
+    `_login_rendered` early return), so ANY rerun after the gate had drawn
+    once — e.g. submitting the login or first-run form — fell through the
+    router and rendered the entire app to a signed-out session. With
+    first-run that means the full app, no password ever configured.
+    """
+
+    def test_rerun_after_gate_drawn_does_not_leak_dashboard(
+            self, configured_db):
+        at = AppTest.from_file(str(APP / "Home.py"))
+        at.session_state["_login_rendered"] = True   # gate drew in a prior run
+        at.run(timeout=30)
+        assert not any("Quick Actions" in (s.value or "")
+                       for s in at.subheader), \
+            "signed-out session reached the dashboard after a rerun"
+
+    def test_rerun_during_first_run_does_not_leak_dashboard(
+            self, tmp_path, monkeypatch):
+        db = Database(db_path=tmp_path / "leak.db")
+        db.init_database()
+        monkeypatch.setattr(Config, "DATABASE_PATH", db.db_path,
+                            raising=True)
+        at = AppTest.from_file(str(APP / "Home.py"))
+        at.session_state["_login_rendered"] = True
+        at.run(timeout=30)
+        subheaders = [s.value or "" for s in at.subheader]
+        assert not any("Quick Actions" in s for s in subheaders), subheaders
+
+
 # ---- the no-restart guarantee ----------------------------------------------
 
 CACHE_PROBE = pathlib.Path(__file__).parent / "pages" / "cache_probe.py"
