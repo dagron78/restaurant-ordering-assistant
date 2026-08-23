@@ -27,6 +27,20 @@ gate_or_stop()
 st.title("📋 Weekly Order Guide")
 st.markdown("*AI-powered recommendations based on prices and your preferences*")
 
+db = Database()
+
+# Prices last updated (#30 D): manager sees freshness BEFORE trusting recs
+_latest_scrape = max(
+    (lg for lg in db.get_recent_processing_logs(limit=100)
+     if lg.get('source_type') == 'scrape' and lg.get('status') == 'success'),
+    key=lambda lg: lg.get('processed_at') or '', default=None)
+if _latest_scrape:
+    _when = (_latest_scrape.get('processed_at') or '')[:16]
+    st.caption(f"\U0001F4C5 Prices last updated {_when} "
+               f"({_latest_scrape.get('source_identifier', 'vendor')} scrape)")
+else:
+    st.caption("\U0001F4C5 No portal scrape recorded - prices from manual entry or email")
+
 # Initialize
 @st.cache_resource
 def get_engine():
