@@ -107,7 +107,7 @@ Cheap reproductions live in `docs/repro/` — stdlib `sqlite3` against
 
 | | Needs |
 |---|---|
-| **slow_ui tests** | **three of four `AppTest` UI tests never run.** `pyproject.toml` sets `addopts = "-q -m 'not slow_ui'"` and no job runs `-m slow_ui`, so the auth-gate test — the control Phase 4 made fail-closed — is deselected in every run. `-rs` shows skips, not deselections, so nothing reports it. Add a CI job that runs the marker |
+| **slow_ui tests** | Partially resolved by Phase 7 (`61997a9`): a dedicated CI job runs `pytest tests/test_ui_apptest.py -m slow_ui`, so the auth-gate control is no longer silently deselected everywhere. The default invocation still excludes the marker (`pyproject addopts`), and `-rs` shows skips not deselections. **Phase A rule:** any behavioural guard for the configuration surface lives OUTSIDE that marker (`tests/test_phase_a_ui.py`) so the default suite tests what new installs land in |
 | **dead filterwarnings** | `pyproject.toml` still ignores `google.generativeai` deprecations "pending migration" — that migration completed in Phase 6 |
 | **#26** Auth selectors | **credentials.** `AUTH_POSITIVE_SELECTORS` are placeholders; the first real scrape aborts until they are tuned to a live signed-in DOM. Fails closed, so it blocks rather than corrupts |
 | **#18** Multi-vendor | largely absorbed by intake; the scraper-per-vendor remainder stands |
@@ -127,6 +127,13 @@ verified by scanning every branch for `AQ.` and `AIza` patterns.
 
 ## Things that will bite you
 
+- **One test environment is not both states the app ships in.** The app
+  supports a CONFIGURED and an UNCONFIGURED configuration, and Charles
+  judges it in both. PR #51 proved the suite green in one while red in
+  the other: the reviewer's verification clone had no `.env`, so every
+  reported pass came from a single environment. Run the suite in both —
+  CI's `test-configured` job does this permanently (dummy bootstrap env
+  vars), but local verification should too.
 - **The venv silently being the wrong Python.** Xcode ships 3.9 at
   `/Applications/Xcode.app/.../python3.9`; a venv built from it satisfies nothing
   and complains about nothing. Print `./venv/bin/python -V` before citing any test

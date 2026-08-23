@@ -13,7 +13,6 @@ Named mutation targets (see PR body):
 """
 
 import pathlib
-import textwrap
 
 import pytest
 
@@ -56,7 +55,7 @@ class TestFirstRunRouting:
         titles = [t.value for t in at.title]
         assert any("first-run setup" in t.lower() for t in titles), titles
         labels = [i.label for i in at.text_input]
-        assert any("Admin password" in (l or "") for l in labels), labels
+        assert any("Admin password" in (lab or "") for lab in labels), labels
         # Fail closed: no dashboard content behind an unconfigured app.
         assert not any("Quick Actions" in (s.value or "")
                        for s in at.subheader)

@@ -56,6 +56,31 @@ jobs:
           name: coverage-report
           path: coverage.xml
 
+  test-configured:
+    name: Tests (configured dummy environment)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Run suite against a CONFIGURED environment
+        env:
+          # The app must behave in BOTH states it ships in. PR #51 proved
+          # the suite green in one environment while red in the other —
+          # the reviewer's clone had no .env, so every "253 passed" came
+          # from a single configuration. This leg runs with bootstrap
+          # credentials present; the default leg runs without.
+          INITIAL_ADMIN_PASSWORD: ci-dummy-admin-password
+        run: pytest -rs -p no:cacheprovider
+
   warnings:
     name: Warnings as errors
     runs-on: ubuntu-latest

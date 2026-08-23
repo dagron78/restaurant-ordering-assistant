@@ -21,7 +21,7 @@ from app.components.resources import get_database
 
 from core import auth
 from core.config import Config
-from core.settings import SETTING_DEFS, get_setting, set_settings
+from core.settings import get_setting, set_settings
 from core.ai_engine import GeminiEngine
 
 log = logging.getLogger(__name__)

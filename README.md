@@ -53,11 +53,12 @@ Captured from a live instance during the Phase 1 runtime walkthrough
    playwright install chromium
    ```
 
-4. **Configure environment**
-   ```bash
-   cp .env.example .env
-   # Edit .env with your API keys and credentials
-   ```
+4. **Bootstrap environment**
+    ```bash
+    cp .env.example .env
+    # Bootstrap only: database path and, optionally, a one-time
+    # INITIAL_ADMIN_PASSWORD. Everything else is configured in the app.
+    ```
 
 5. **Initialize database**
    ```bash
@@ -65,34 +66,45 @@ Captured from a live instance during the Phase 1 runtime walkthrough
    ```
 
 6. **Run the application**
-   ```bash
-   streamlit run app/Home.py
-   ```
+    ```bash
+    streamlit run app/Home.py
+    ```
 
-7. **Open in browser**: http://localhost:8501
+7. **Open in browser**: http://localhost:8501 — first run shows the
+   setup page: set the admin and app passwords (and optionally the
+   Gemini API key), then sign in.
 
 ## Configuration
 
-### Environment Variables
+**Everything an operator changes lives in the app now** — Settings → 🔑
+Configuration (admin password required): Gemini API key, mailbox
+credentials and IMAP host, scrape day/hour/delay, email check interval,
+trend/spike/deal thresholds, both passwords, vendor email domains and
+portal URLs. Changes save to the local database and take effect on the
+next page run — no restart, no file editing.
 
-Copy `.env.example` to `.env` and configure:
+The `.env` file is bootstrap only: `DATABASE_PATH` and the one-time
+`INITIAL_ADMIN_PASSWORD` (see `.env.example`).
 
-```bash
-# Required
-GOOGLE_API_KEY=your_gemini_api_key
+### Two passwords
 
-# Email monitoring
-EMAIL_USER=orders@yourrestaurant.com
-EMAIL_PASS=your_email_app_password
-EMAIL_IMAP_SERVER=imap.gmail.com
+| Password | Grants |
+|---|---|
+| **App password** | The ordering round: order guide, quantities, orders, history |
+| **Admin password** | Everything above, plus all configuration |
 
-# Optional: require a password to open the app (recommended!)
-APP_PASSWORD=a-shared-secret
+One shared secret per role — proportionate to one kitchen.
 
-# Vendor logins are NOT stored here - sessions are created manually:
-#   python workers/web_scraper.py --refresh sysco
-#   python workers/web_scraper.py --refresh usfoods
-```
+### Security model, stated plainly
+
+This app is built for **trusted-LAN, single-tenant** use: it runs on a
+computer in the restaurant and is reached from phones on the same wifi.
+Its security model is those two passwords. Configuration — including the
+Gemini API key and mailbox password — lives in the local SQLite file
+(chmod 0600) rather than `.env`; on a single-tenant box that is roughly
+equivalent exposure, since anyone with filesystem access reads either.
+The gain is that the admin UI can write these values, not that they are
+encrypted. Nothing about this setup is safe on an untrusted network.
 
 ### Preferences
 
@@ -279,7 +291,7 @@ comparison = engine.compare_vendors("Heavy Cream")
 ## Troubleshooting
 
 ### "Gemini API key not configured"
-- Ensure `GOOGLE_API_KEY` is set in `.env`
+- Set it in the app: Settings → 🔑 Configuration (admin sign-in)
 - Get a key from [Google AI Studio](https://makersuite.google.com/app/apikey)
 
 ### "No valid session for Sysco"
@@ -288,7 +300,7 @@ comparison = engine.compare_vendors("Heavy Cream")
 - Session is saved for future runs
 
 ### Email not processing
-- Check IMAP settings in `.env`
+- Check mailbox settings in the app: Settings → 🔑 Configuration
 - For Gmail, enable "Less secure apps" or use App Passwords
 - Verify email domain filters in `config.py`
 
@@ -306,8 +318,9 @@ pytest tests/
 ```
 
 Tests run automatically in CI (`.github/workflows/ci.yml`) on every push to
-`master` and every pull request: ruff lint, a test suite on Python 3.11
-with coverage, and a Docker image build.
+`master` and every pull request: ruff lint, the suite on Python 3.11 with
+coverage, the suite again against a configured dummy environment, slow UI
+tests, and a Docker image build.
 
 ### Linting
 ```bash
@@ -322,11 +335,13 @@ ruff check .
 
 ## Security Notes
 
-- **App access**: set `APP_PASSWORD` to require a password on every page.
-  This is a single shared password with unlimited attempts - there is no
-  lockout or rate limiting. That's a deliberate trade-off for a homelab
-  deployment; put the app behind a VPN or reverse proxy with real auth if
-  that isn't acceptable for your network.
+- **Two passwords** (Phase A): an app password for the ordering round and
+  an admin password that additionally unlocks configuration. Both are
+  shared secrets with unlimited attempts — there is no lockout or rate
+  limiting. That's a deliberate trade-off for a trusted-LAN deployment;
+  put the app behind a VPN or reverse proxy with real auth if that isn't
+  acceptable for your network. See "Security model" above for what these
+  passwords do and do not protect.
 - **Vendor email trust**: price-list ingestion trusts the sender's *domain*
   only (`sysco.com`, `usfoods.com`, exact/subdomain match). There is no
   DKIM/SPF verification - anyone who can spoof the sender address can have

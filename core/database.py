@@ -72,6 +72,24 @@ class Database:
         """
         self.db_path = db_path or Config.DATABASE_PATH
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        # Trusted-LAN single-tenant model: the settings store now holds the
+        # API key and mailbox password. Tighten the file so only the owning
+        # user reads it — parity with a 0600 .env, stated in docs rather
+        # than implied encryption.
+        self._harden_permissions()
+
+    def _harden_permissions(self) -> None:
+        """Best-effort owner-only permissions on the database and its WAL
+        sidecars. Never fatal on filesystems that do not support it."""
+        try:
+            import os
+
+            for suffix in ("", "-wal", "-shm"):
+                target = Path(str(self.db_path) + suffix)
+                if target.exists():
+                    os.chmod(target, 0o600)
+        except OSError:
+            pass
     
     @contextmanager
     def get_connection(self):
