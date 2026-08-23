@@ -11,12 +11,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from app.components.auth_gate import gate_or_stop
+from app.components.resources import get_engine, get_database
 
 import streamlit as st
 import pandas as pd
-
-from core.database import Database
-from core.recommendation import RecommendationEngine
 
 
 gate_or_stop()
@@ -25,8 +23,8 @@ st.title("📈 Price Trends & Savings")
 st.markdown("*Analyze pricing history, track savings, and identify opportunities*")
 
 # Initialize
-db = Database()
-engine = RecommendationEngine()
+db = get_database()
+engine = get_engine()
 
 if engine.ai is None:
     st.caption("💡 Add a Gemini API key to enable AI-scored trend analysis.")

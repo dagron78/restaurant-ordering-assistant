@@ -29,18 +29,26 @@ def test_no_mail_transport_dependency_is_available_to_exports():
         assert not line.strip().startswith(("smtp", "aiosmtplib")), line
 
 
-class TestOpenAccessNavigation:
-    """Issue #37: with no APP_PASSWORD, the data-preauth marker must NOT
-    be emitted — it hides the sidebar, making the app unusable in its
-    default state. This test runs in the DEFAULT pytest invocation."""
+class TestUnconfiguredFailsClosedIntoSetup:
+    """Phase A (issue #50) supersedes issue #37's open-access-with-warning:
+    an app with no admin password now routes to FIRST-RUN SETUP instead of
+    running open. This test runs in the DEFAULT pytest invocation."""
 
-    def test_marker_not_emitted_when_password_unset(self):
+    def test_open_access_warning_is_gone(self):
         gate = (APP / "components" / "auth_gate.py").read_text()
-        # Search for the actual emission, not docstring/comment mentions
+        assert "No APP_PASSWORD is set" not in gate, (
+            "open-access warning path still present — Phase A replaced it "
+            "with mandatory first-run setup")
+
+    def test_unconfigured_routes_to_first_run_before_any_marker(self):
+        gate = (APP / "components" / "auth_gate.py").read_text()
+        setup_pos = gate.index("render_setup(db=db)")
         marker_pos = gate.index("st.markdown('<div data-preauth")
-        warning_pos = gate.index("No APP_PASSWORD is set")
-        return_pos = gate.index("return", warning_pos)
-        # Marker must come AFTER the no-password early return
-        assert marker_pos > return_pos, (
-            "data-preauth marker emitted before the no-password check — "
-            "open-access users lose their navigation (issue #37 regression)")
+        # The first-run branch must precede the gated-mode marker emission:
+        # an unconfigured app must never fall through to normal sign-in.
+        assert setup_pos < marker_pos
+
+    def test_first_run_sets_passwords_through_the_store(self):
+        fr = (APP / "components" / "first_run.py").read_text()
+        assert "auth.set_password(\"admin\"" in fr
+        assert "auth.set_password(\"app\"" in fr

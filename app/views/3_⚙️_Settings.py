@@ -16,10 +16,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 import streamlit as st
 import pandas as pd
 
-from app.components.auth_gate import gate_or_stop
+from app.components.auth_gate import gate_or_stop, require_admin
+from app.components.resources import get_database
 
+from core import auth
 from core.config import Config
-from core.database import Database
+from core.settings import SETTING_DEFS, get_setting, set_settings
 from core.ai_engine import GeminiEngine
 
 log = logging.getLogger(__name__)
@@ -31,10 +33,13 @@ gate_or_stop()
 st.title("⚙️ Settings")
 
 # Initialize
-db = Database()
+db = get_database()
 
-# Tabs for different settings sections
-tab1, tab2, tab3, tab4 = st.tabs(["📸 Add Items", "📝 Preferences", "🔧 System", "📊 Data"])
+# Tabs for different settings sections. Configuration is admin-only:
+# the app password grants the ordering round, not this tab (issue #50).
+tab1, tab2, tab3, tab4, tab5 = st.tabs(
+    ["📸 Add Items", "📝 Preferences", "🔧 System", "📊 Data",
+     "🔑 Configuration"])
 
 # ===========================================
 # TAB 1: ADD ITEMS
@@ -473,7 +478,194 @@ with tab3:
     st.dataframe(pd.DataFrame(status_data), width='stretch', hide_index=True)
     
     if not validation['all_valid']:
-        st.warning("Some configuration is missing. Copy `.env.example` to `.env` and fill in your credentials.")
+        st.warning("Some configuration is missing. Set it in the "
+                   "🔑 Configuration tab — no file editing or restart "
+                   "needed.")
+
+# ===========================================
+# TAB 5: ADMIN CONFIGURATION (issue #50)
+# Everything an operator would ever change, behind the admin password,
+# effective on the next page run. No restart, no .env.
+# ===========================================
+with tab5:
+    if not require_admin():
+        st.stop()
+
+    def _masked_state(key: str) -> str:
+        """Display helper for secrets: never echo the stored value."""
+        return "configured" if get_setting(key, db=db) else "not set"
+
+    # ---- AI -------------------------------------------------------------
+    st.subheader("🤖 AI (Gemini)")
+    with st.form("cfg_ai", border=True):
+        api_key = st.text_input(
+            "Gemini API key",
+            type="password",
+            value="",
+            placeholder=f"({_masked_state('GOOGLE_API_KEY')} — leave blank to keep)",
+            help="Powers price-sheet parsing and natural-language rules.")
+        flash_model = st.text_input("Flash model",
+                                    value=get_setting("GEMINI_MODEL_FLASH", db=db))
+        pro_model = st.text_input("Pro model",
+                                  value=get_setting("GEMINI_MODEL_PRO", db=db))
+        if st.form_submit_button("Save AI settings", type="primary"):
+            updates = {"GEMINI_MODEL_FLASH": flash_model.strip(),
+                       "GEMINI_MODEL_PRO": pro_model.strip()}
+            if api_key.strip():
+                updates["GOOGLE_API_KEY"] = api_key.strip()
+            set_settings(updates, db=db)
+            st.success("AI settings saved — effective immediately.")
+
+    st.divider()
+
+    # ---- Email intake ---------------------------------------------------
+    st.subheader("📧 Email intake")
+    with st.form("cfg_email", border=True):
+        email_user = st.text_input("Mailbox user",
+                                   value=get_setting("EMAIL_USER", db=db))
+        email_pass = st.text_input(
+            "Mailbox password", type="password", value="",
+            placeholder=f"({_masked_state('EMAIL_PASS')} — leave blank to keep)")
+        imap = st.text_input("IMAP host",
+                             value=get_setting("EMAIL_IMAP_SERVER", db=db))
+        interval = st.number_input(
+            "Check interval (hours)", min_value=1, max_value=168,
+            value=int(get_setting("EMAIL_CHECK_INTERVAL", db=db)))
+        if st.form_submit_button("Save email settings", type="primary"):
+            updates = {"EMAIL_USER": email_user.strip(),
+                       "EMAIL_IMAP_SERVER": imap.strip(),
+                       "EMAIL_CHECK_INTERVAL": int(interval)}
+            if email_pass.strip():
+                updates["EMAIL_PASS"] = email_pass.strip()
+            set_settings(updates, db=db)
+            st.success("Email settings saved — effective immediately.")
+
+    st.divider()
+
+    # ---- Scheduling -----------------------------------------------------
+    st.subheader("🗓️ Scraping schedule")
+    with st.form("cfg_schedule", border=True):
+        days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        day_idx = int(get_setting("SCRAPE_DAY", db=db))
+        scrape_day = st.selectbox(
+            "Scrape day", options=list(range(7)),
+            format_func=lambda d: days[d],
+            index=day_idx if 0 <= day_idx < 7 else 0)
+        scrape_hour = st.number_input(
+            "Scrape hour (0-23)", min_value=0, max_value=23,
+            value=int(get_setting("SCRAPE_HOUR", db=db)))
+        scrape_delay = st.number_input(
+            "Pause between items (seconds)", min_value=0.0, max_value=60.0,
+            step=0.5,
+            value=float(get_setting("SCRAPE_DELAY_SECS", db=db)))
+        if st.form_submit_button("Save schedule", type="primary"):
+            set_settings({
+                "SCRAPE_DAY": int(scrape_day),
+                "SCRAPE_HOUR": int(scrape_hour),
+                "SCRAPE_DELAY_SECS": float(scrape_delay),
+            }, db=db)
+            st.success("Schedule saved. The app reads these values live; "
+                       "the background scheduler picks them up at its next "
+                       "start (it builds its cron triggers on startup).")
+
+    st.divider()
+
+    # ---- Thresholds -----------------------------------------------------
+    st.subheader("📈 Trend thresholds")
+    with st.form("cfg_thresholds", border=True):
+        trend_days = st.number_input(
+            "Rolling average window (days)", min_value=7, max_value=365,
+            value=int(get_setting("TREND_DAYS", db=db)))
+        spike_pct = st.number_input(
+            "Spike threshold (%)", min_value=1.0, max_value=100.0, step=1.0,
+            value=float(get_setting("SPIKE_THRESHOLD", db=db)) * 100.0,
+            help="A rise beyond this fraction of the rolling average is a spike.")
+        deal_pct = st.number_input(
+            "Deal threshold (−%, negative deals only)",
+            min_value=-100.0, max_value=-1.0, step=1.0,
+            value=float(get_setting("DEAL_THRESHOLD", db=db)) * 100.0,
+            help="A drop beyond this fraction of the rolling average is a deal.")
+        if st.form_submit_button("Save thresholds", type="primary"):
+            set_settings({
+                "TREND_DAYS": int(trend_days),
+                "SPIKE_THRESHOLD": float(spike_pct) / 100.0,
+                "DEAL_THRESHOLD": float(deal_pct) / 100.0,
+            }, db=db)
+            st.success("Thresholds saved — effective immediately.")
+
+    st.divider()
+
+    # ---- Passwords ------------------------------------------------------
+    st.subheader("🔐 Passwords")
+    col_admin_pw, col_app_pw = st.columns(2)
+
+    with col_admin_pw:
+        st.markdown("**Admin password**")
+        with st.form("cfg_admin_pw", border=True):
+            cur_a = st.text_input("Current admin password",
+                                  type="password", key="cur_admin")
+            new_a = st.text_input("New admin password",
+                                  type="password", key="new_admin")
+            new_a2 = st.text_input("Repeat new admin password",
+                                   type="password", key="new_admin2")
+            if st.form_submit_button("Change admin password", type="primary"):
+                if new_a != new_a2:
+                    st.error("New passwords do not match.")
+                elif not new_a:
+                    st.error("New password must not be empty.")
+                elif auth.change_password("admin", new_a, cur_a, db=db):
+                    st.success("Admin password changed.")
+                else:
+                    st.error("Current admin password incorrect — not changed.")
+
+    with col_app_pw:
+        app_set = bool(get_setting("app_password_hash", db=db))
+        st.markdown(f"**App password** ({'set' if app_set else 'not yet set'})")
+        st.caption("Changing this requires the admin password.")
+        with st.form("cfg_app_pw", border=True):
+            cur_p = st.text_input("Admin password (to authorize)",
+                                  type="password", key="cur_app")
+            new_p = st.text_input("New app password",
+                                  type="password", key="new_app")
+            new_p2 = st.text_input("Repeat new app password",
+                                   type="password", key="new_app2")
+            if st.form_submit_button("Set app password", type="primary"):
+                if new_p != new_p2:
+                    st.error("Passwords do not match.")
+                elif not new_p:
+                    st.error("Password must not be empty.")
+                elif auth.authenticate(cur_p, db=db) == "admin":
+                    auth.set_password("app", new_p, db=db)
+                    st.success("App password saved.")
+                else:
+                    st.error("Admin password incorrect — not changed.")
+
+    st.divider()
+
+    # ---- Vendors --------------------------------------------------------
+    st.subheader("🏬 Vendor connections")
+    st.caption("Email domain drives intake sender-matching; portal URL and "
+               "the scrape toggle drive the weekly portal scrape.")
+    for vendor in db.get_all_vendors():
+        with st.expander(f"{vendor['name']}"):
+            with st.form(f"vendor_{vendor['id']}", border=True):
+                domain = st.text_input(
+                    "Email domain",
+                    value=vendor.get("email_domain") or "",
+                    key=f"vd_{vendor['id']}")
+                url = st.text_input(
+                    "Portal URL",
+                    value=vendor.get("scrape_url") or "",
+                    key=f"vu_{vendor['id']}")
+                enabled = st.checkbox(
+                    "Portal scraping enabled",
+                    value=bool(vendor.get("scrape_enabled")),
+                    key=f"ve_{vendor['id']}")
+                if st.form_submit_button("Save vendor", type="primary"):
+                    db.update_vendor_details(
+                        vendor["id"], email_domain=domain, scrape_url=url,
+                        scrape_enabled=enabled)
+                    st.success(f"{vendor['name']} saved.")
 
 # ===========================================
 # TAB 4: DATA

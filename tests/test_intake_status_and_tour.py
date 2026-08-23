@@ -1,12 +1,17 @@
 """Behavioural guards for intake status panel and tour (issue #30 C/D).
 
 These tests exercise rendered output, not source text.
+
+Phase A (issue #50): credentials live in the settings store. Fixtures
+configure an admin + app password there and sign the AppTest session in
+by setting its role directly.
 """
 
 import pathlib
 
 import pytest
 
+from core import auth
 from core.config import Config
 from core.database import Database
 
@@ -35,11 +40,20 @@ def seeded_db(tmp_path):
 
 
 @pytest.fixture()
-def home_app(seeded_db, monkeypatch):
-    monkeypatch.setattr(Config, 'DATABASE_PATH', seeded_db.db_path,
+def configured_db(seeded_db):
+    """A database with both passwords configured (Phase A model)."""
+    auth.set_password("admin", "admin-secret", db=seeded_db)
+    auth.set_password("app", "app-secret", db=seeded_db)
+    return seeded_db
+
+
+@pytest.fixture()
+def home_app(configured_db, monkeypatch):
+    monkeypatch.setattr(Config, 'DATABASE_PATH', configured_db.db_path,
                         raising=True)
-    monkeypatch.setattr(Config, 'APP_PASSWORD', '', raising=True)
-    return AppTest.from_file(str(APP / "Home.py"))
+    at = AppTest.from_file(str(APP / "Home.py"))
+    at.session_state["role"] = "admin"
+    return at
 
 
 class TestIntakeStatusPanel:
@@ -75,32 +89,30 @@ class TestIntakeStatusPanel:
 class TestTourRendersFourSteps:
     """All four steps reachable via session_state stepping."""
 
-    def test_all_four_steps_render_in_sequence(self, tmp_path):
+    def test_all_four_steps_render_in_sequence(self, tmp_path, monkeypatch):
         db = Database(db_path=tmp_path / "tour.db")
         db.init_database()
         db.add_item("Sample Item", "Test", "Each")
+        auth.set_password("admin", "tour-admin", db=db)
+        auth.set_password("app", "tour-app", db=db)
 
-        original_db = Config.DATABASE_PATH
-        original_pw = Config.APP_PASSWORD
-        Config.DATABASE_PATH = db.db_path
-        Config.APP_PASSWORD = ""
-        try:
-            tour_path = str(pathlib.Path(__file__).parent.parent /
-                            "app" / "views" / "4_📖_How_This_Works.py")
+        monkeypatch.setattr(Config, "DATABASE_PATH", db.db_path,
+                            raising=True)
+
+        tour_path = str(pathlib.Path(__file__).parent.parent /
+                        "app" / "views" / "4_📖_How_This_Works.py")
+
+        expected = [
+            "Here is what we know today",
+            "Tell it how you buy",
+            "Build an order",
+            "Take it to the walk-in",
+        ]
+        for step, want in enumerate(expected, 1):
             at = AppTest.from_file(tour_path)
-
-            expected = [
-                "Here is what we know today",
-                "Tell it how you buy",
-                "Build an order",
-                "Take it to the walk-in",
-            ]
-            for step, want in enumerate(expected, 1):
-                at.session_state["tour_step"] = step
-                at.run(timeout=15)
-                titles = [t.value for t in at.title]
-                assert any(want in t for t in titles), \
-                    f"step {step}: '{want}' not found in {titles}"
-        finally:
-            Config.DATABASE_PATH = original_db
-            Config.APP_PASSWORD = original_pw
+            at.session_state["role"] = "app"
+            at.session_state["tour_step"] = step
+            at.run(timeout=15)
+            titles = [t.value for t in at.title]
+            assert any(want in t for t in titles), \
+                f"step {step}: '{want}' not found in {titles}"
