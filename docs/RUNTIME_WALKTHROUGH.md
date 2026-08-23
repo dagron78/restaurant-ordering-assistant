@@ -1,6 +1,42 @@
 # Runtime Walkthrough — Phase 1
 
 **Date:** 22 Aug 2026 · branch `phase/1-runtime-walkthrough` · Streamlit 1.50.0 · Python 3.9 (local venv)
+
+> **SUPERSEDED by the Phase 7 re-run below** — Phase 1 ran on Python 3.9
+> against a much earlier codebase and never tested the unset-password state.
+> The re-run below was performed on Python 3.11.15 against master @ `152de62`
+> with all seven phases merged.
+
+## Phase 7 re-run (22 Aug 2026, Python 3.11.15, master @ 152de62)
+
+### D9 · CRITICAL — no APP_PASSWORD hides the entire navigation (issue #37)
+
+The `render_login()` gate emitted the `data-preauth` marker **before**
+checking whether a password was required, then returned early on the
+no-password branch with the marker still on the page — hiding the sidebar
+from users who were never asked for credentials. The app rendered as a
+landing page with no navigation.
+
+**Why it survived:** Phase 7's walkthrough "re-run" refreshed screenshots
+with `APP_PASSWORD` set but did not test the unset-password state against
+the finished UI. The three AppTest tests covering this path were deselected
+by `-m 'not slow_ui'` until PR #36 landed, and two are now xfail because
+AppTest cannot drive st.form submit buttons. The gate's rendering path has
+never been executed by a passing test until now.
+
+**Fixed in this phase.** Marker moved below the early return; regression
+test added to the DEFAULT pytest invocation; all three auth states verified
+in-browser with Playwright screenshots attached to PR #37.
+
+### Verified auth states (post-fix)
+
+| State | Sidebar | Nav links | Gate | Pages render |
+|---|---|---|---|---|
+| Unset (open access) | visible | 5 (Home/OG/Trends/Settings/HTW) | warning banner | ✓ |
+| Set, pre-auth | absent | 0 | sign-in form only | n/a |
+| Set, post-auth | visible | 5 | none | ✓ |
+
+
 **Method:** real server on `127.0.0.1:8501`, driven headlessly by Playwright's
 own bundled Chromium (not any paired Chrome). Server logs captured per pass.
 First time anything in this repo has been verified against a running instance.
