@@ -57,7 +57,6 @@ class TestIntakeStatusPanel:
         """Asserts the ACTUAL count, not just the word. Hardcoding 0
         fails because the fixture seeds one quarantine row."""
         home_app.run(timeout=30)
-        captions = [c.value for c in home_app.caption]
 
         # Quarantine renders as st.warning when >0 (seeded: 1 row)
         # or st.caption when 0. Check both channels.
@@ -70,7 +69,7 @@ class TestIntakeStatusPanel:
 
         # Must contain the ACTUAL count (1 from fixture)
         assert "1 message" in all_warning_text, \
-            f"count '1' not found in quarantine warning text"
+            "count '1' not found in quarantine warning text"
 
 
 class TestTourRendersFourSteps:
