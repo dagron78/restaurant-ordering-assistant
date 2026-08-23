@@ -8,7 +8,6 @@ Revert verification: change RecommendationEngine.__init__ back to
 self.ai = ai or GeminiEngine() and confirm every test here fails.
 """
 
-import pathlib
 
 import pytest
 
@@ -84,4 +83,3 @@ class TestPageDegradesNotStops:
         assert rec['recommended_vendor'] != 'N/A'
 
 
-import pathlib
