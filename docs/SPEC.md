@@ -33,8 +33,9 @@ and is used from a phone on the same wifi.
 5. **The draft plan appears on the phone.** Every suggestion is overridable: the
    manager can change the vendor or the quantity on any line, easily, without
    leaving the flow.
-6. **They confirm, and the orders go to the vendors** — one order per vendor,
-   sent from the app.
+6. **They confirm, and the app builds the order** — one order per vendor. **It
+   does not send it.** The manager chooses how to place each order: they may
+   prefer to phone a rep and confirm there are no issues.
 7. **Everything is kept**: what was ordered, from whom, at what price, against
    which alternative, under which rule.
 
@@ -97,12 +98,11 @@ instructions. That is not a connect flow.
 
 ## What changes from earlier decisions
 
-**Sending email is now required.** `core/exports.py` was deliberately built with
-no SMTP surface, guarded by `tests/test_no_send_guard.py`. That was the right
-default for drafts and is now wrong. Sending must exist — behind an explicit
-confirm, with the draft shown first, and with a record of what was sent. The
-guard should be replaced by one asserting nothing sends *without* confirmation,
-which is the property actually worth protecting.
+**Nothing sends itself — confirmed.** An earlier draft of this document said
+sending was now required and that `tests/test_no_send_guard.py` should be
+replaced. That was wrong: confirming *builds* the order, and the manager places
+it however they choose. The no-send guard stands exactly as written, and no
+outbound mail surface is added to a LAN-exposed app.
 
 **LAN exposure is now a requirement, not a finding.** F-10 flagged
 `0.0.0.0:8501` with no login as a risk. The spec requires phone access over wifi,
@@ -120,16 +120,81 @@ being real.
 - Full history: prices, orders, savings basis, processing log
 - 253 tests, eleven behavioural properties each pinned by a mutation-verified guard (`docs/HANDOFF.md`)
 
-## Open decisions
+## Decisions, settled
 
-1. **Portal login on a headless box.** Either the admin runs a helper on a laptop
-   and uploads the session file through the admin UI, or the restaurant computer
-   has a display and the app launches a local browser for the login. The second
-   is a better experience and constrains the deployment (native on the box rather
-   than headless Docker). Needs a call.
-2. **Does confirming a plan send immediately, or queue for a second look?** The
-   spec says the manager confirms and it goes. Worth deciding whether there is
-   any hold at all, because unsending an order to a vendor is not possible.
-3. **Order sheet format.** What does the kitchen's existing sheet look like — a
-   spreadsheet, a vendor's order guide export, paper? That determines whether
-   "uploaded at install" is a parse job or a data entry job.
+**The restaurant computer has a display.** So "Connect Sysco" opens a real
+browser on the box for the manual login and captures the session locally — a
+genuine connect flow, not a button that prints CLI instructions. This decides the
+deployment: **the app runs natively on the box, not in headless Docker.** F-35
+(session refresh needs a TTY) is resolved by that choice rather than by
+documentation. The Dockerfile stays for development but stops being the
+recommended deployment.
+
+**Confirming builds the order; it does not send it.** See above.
+
+**The order sheet is a spreadsheet.** So import is a **deterministic parse**
+(`openpyxl` / `csv`), never an AI extraction — it is structured data, and parsing
+it locally is free, instant, needs no API key and cannot hallucinate a quantity.
+The kitchen's sheet will not use our column names, so import needs a one-time
+**column-mapping step**: point *their* headers at item / unit / par.
+
+Note a live defect on this exact path: `Config.VALID_EXTENSIONS` already permits
+`.xlsx`, `.xls` and `.csv`, but `parse_document()` sends anything that is not a
+PDF to `PIL.Image.open()`. Uploading a CSV today raises
+`UnidentifiedImageError`. The app invites a spreadsheet and crashes on it.
+
+**Par levels prefill the sheet.** Each item on the order sheet carries a normal
+quantity. The sheet opens pre-filled and the manager adjusts from there rather
+than starting at zero.
+
+**The manager chooses how to place each order.** They may want to speak to a rep.
+So the outputs have to serve more than email: a per-vendor sheet that is
+**readable aloud over the phone** — vendor, item, quantity, unit, and the price
+being expected — as well as a PDF to print and a draft to copy or attach.
+
+**Two ordering modes, admin-selectable.**
+
+| Mode | Flow | Suits |
+|---|---|---|
+| **Plan-after** (default) | walk the sheet → Send → suggested plan → override → confirm | working from par levels; keeps "how much do we need" separate from "where do we buy it" |
+| **Plan-during** | prices and best-vendor shown inline while entering quantities | reacting to deals — "avocados are down 12%, take four cases" |
+
+Plan-during is what exists today, so the toggle makes the current Order Guide one
+of two modes rather than work to be discarded.
+
+**Vendor override is missing in both modes and is new work either way.** Today
+`vendor_id` comes from whatever the engine picked and is written straight to the
+order line; the only `radio` on the Order Guide is the Cards/Table view switch.
+The manager can change *how much* but never *from whom*. Build the override once
+as a shared component and place it inline in plan-during and on the plan screen
+in plan-after.
+
+---
+
+## Build order
+
+Each phase leaves the app more usable than it found it. Phase A first because
+everything else is easier once configuration is not a file on a server.
+
+**A · Configuration surface.** Two passwords — app and admin. The 15 `.env`
+settings move into the database behind the admin password, changeable without a
+restart. `.env` keeps only what is needed to boot: database path and the initial
+admin password. First-run page to set both passwords and the API key. *This is
+the phase that answers "I can't log in and I can't set the API key."*
+
+**B · The order sheet.** Par levels in the schema; deterministic spreadsheet
+import with column mapping; fix the `PIL.Image.open()` crash on spreadsheets.
+
+**C · The ordering round.** Phone-shaped sheet view prefilled from par; Send;
+the suggested-plan screen; the vendor-override component; the mode toggle;
+confirm builds and stores the order.
+
+**D · Outputs.** Per-vendor sheet readable aloud, PDF to print, draft to copy or
+attach. Nothing sends itself.
+
+**E · Portal connection.** In-app Connect flow launching a browser on the box;
+tune `AUTH_POSITIVE_SELECTORS` against the live signed-in DOM (#26); native
+deployment documented.
+
+**F · First real intake.** Provision the mailbox; a real vendor price sheet
+landing in `price_history` end to end. The worker equivalent of Phase 1.
