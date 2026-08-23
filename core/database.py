@@ -108,9 +108,27 @@ class Database:
             schema_sql = f.read()
         
         with self.get_connection() as conn:
-            conn.executescript(schema_sql)
-            # A fresh build is born current; real upgrades go through migrate().
-            conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            current_version = conn.execute(
+                "PRAGMA user_version").fetchone()[0]
+
+            if current_version >= SCHEMA_VERSION:
+                return                                    # already current
+
+            has_tables = conn.execute(
+                "SELECT COUNT(*) AS n FROM sqlite_master"
+                " WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            ).fetchone()["n"]
+
+            if has_tables == 0:
+                # Truly fresh: full DDL is safe and sufficient
+                conn.executescript(schema_sql)
+                conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+                return
+
+        # Existing database below SCHEMA_VERSION: apply pending migrations.
+        # NEVER run full DDL here — CREATE IF NOT EXISTS won't add columns
+        # to existing tables, and ALTER TABLE from migrations handles that.
+        self.migrate()
 
     def migrate(self) -> list:
         """
