@@ -121,6 +121,8 @@ def home_dashboard():
                 f"📥 {q_count} message(s) from unrecognised senders are "
                 "waiting in Settings → Data → Quarantine.",
                 icon="📥")
+        else:
+            st.caption("📥 Quarantine queue empty — all senders recognised.")
 
     except Exception as e:
         st.error(f"Error loading stats: {e}")
