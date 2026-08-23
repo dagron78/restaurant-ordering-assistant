@@ -56,7 +56,7 @@ def home_dashboard():
     st.markdown("*Smart ordering recommendations powered by AI*")
 
     st.markdown("### 🚀 Quick Actions")
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     cards = [
         (col1, "/Order_Guide", "📋", "Start Order",
          "View recommendations & create orders"),
@@ -64,6 +64,8 @@ def home_dashboard():
          "Upload photos to add new items"),
         (col3, "/Trends", "📈", "Analyze Trends",
          "Check price history & reports"),
+        (col4, "/How_This_Works", "🎓", "Tutorial",
+         "Interactive guide & sandbox"),
     ]
     for col, href, icon, title, desc in cards:
         with col:
