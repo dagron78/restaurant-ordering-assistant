@@ -32,11 +32,9 @@ def _password_ok(candidate: str) -> bool:
 
 def render_login():
     """Sign-in screen. Call instead of navigating to protected pages."""
-    # Cosmetic scoping: style.css hides sidebar/toolbar while this marker
-    # exists. A plain div with a data attribute survives Streamlit's HTML
-    # sanitization (<style> does not).
-    st.markdown('<div data-preauth hidden></div>', unsafe_allow_html=True)
-
+    # Open access: warn but do NOT emit the data-preauth marker — the
+    # marker hides the sidebar, and hiding navigation from a user who
+    # was never asked for a password makes the app unusable (#37).
     if not Config.APP_PASSWORD:
         st.warning(
             "🔓 **No APP_PASSWORD is set.** Anyone who can reach this app "
@@ -44,7 +42,12 @@ def render_login():
             "Set `APP_PASSWORD` in `.env` to lock it down.",
             icon="⚠️"
         )
-        return
+        return                                    # open access: nav stays visible
+
+    # Gated mode: emit the sidebar-hiding marker ONLY when we are actually
+    # demanding sign-in. A plain div with a data attribute survives
+    # Streamlit's HTML sanitization (<style> does not).
+    st.markdown('<div data-preauth hidden></div>', unsafe_allow_html=True)
 
     st.title("🔐 Kitchen Order Guide")
     st.caption("Enter the app password to continue.")
