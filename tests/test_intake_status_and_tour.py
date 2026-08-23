@@ -28,6 +28,9 @@ def seeded_db(tmp_path):
     db.log_processing(source_type="scrape", source_identifier="Sysco",
                       filename="weekly_scrape", status="success",
                       items_processed=2)
+    # Seed a quarantine row so the count assertion is non-zero
+    db.add_quarantine("stranger@newvendor.example", "Our price list v1",
+                      ["prices.pdf"])
     return db
 
 
@@ -50,10 +53,24 @@ class TestIntakeStatusPanel:
         assert "2 prices updated" in row
         assert any(ch.isdigit() for ch in row)
 
-    def test_quarantine_status_always_visible(self, home_app):
+    def test_quarantine_count_is_accurate(self, home_app):
+        """Asserts the ACTUAL count, not just the word. Hardcoding 0
+        fails because the fixture seeds one quarantine row."""
         home_app.run(timeout=30)
         captions = [c.value for c in home_app.caption]
-        assert any("uarantine" in c or "Quarantine" in c for c in captions)
+
+        # Quarantine renders as st.warning when >0 (seeded: 1 row)
+        # or st.caption when 0. Check both channels.
+        all_warning_text = ' '.join(
+            w.value for w in home_app.warning if w.value)
+        assert "uarantine" in all_warning_text.lower() or \
+               "message" in all_warning_text.lower(), \
+            f"quarantine warning not found. Warnings: " \
+            f"{[w.value[:60] for w in home_app.warning]}"
+
+        # Must contain the ACTUAL count (1 from fixture)
+        assert "1 message" in all_warning_text, \
+            f"count '1' not found in quarantine warning text"
 
 
 class TestTourRendersFourSteps:
