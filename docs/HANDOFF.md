@@ -1,7 +1,7 @@
 # Handoff
 
 *For whoever picks this up next — a fresh agent session, a new contributor, or the
-same people after a gap. Written 22 Aug 2026 at `master @ fd214cb`, with the build feature-complete.*
+same people after a gap. Written 22 Aug 2026 at `master @ f7951df`, with the build feature-complete.*
 
 ## What this is
 
@@ -23,8 +23,8 @@ single largest gap between this build and a working weekly cycle.
 
 | | |
 |---|---|
-| Branch | `master @ fd214cb`, 78 commits, 24 merged PRs |
-| Tests | 242 passing, 1 skipped (deliberate live-API test), 3 deselected |
+| Branch | `master @ f7951df`, 88 commits, 29 merged PRs |
+| Tests | 250 passing, 1 skipped (deliberate live-API test), 4 deselected |
 | Python | 3.11 everywhere — `.python-version`, `requires-python`, ruff target, CI, Docker |
 | Local venv | `./venv` — **must be uv-managed 3.11**, not the Xcode 3.9 that caused #13 |
 | CI | lint · tests · docker build · warnings-as-errors |
