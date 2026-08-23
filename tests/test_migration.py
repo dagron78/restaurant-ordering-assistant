@@ -227,3 +227,53 @@ def test_second_migrate_is_noop(tmp_path):
         after = conn.execute(
             "SELECT COUNT(*) FROM order_items").fetchone()[0]
     assert before == after
+
+
+class TestInitDatabaseMigration:
+    """Issue #41: init_database() is the function users actually invoke.
+    It must migrate an existing old-schema database, not just build fresh
+    ones. The structural-identity test calls migrate() directly and never
+    goes through this entry point."""
+
+    def test_init_database_migrates_existing_old_db_with_data(self, tmp_path):
+        """Build a pre-migration DB WITH data from the frozen 000_base.sql,
+        call init_database(), assert version + columns + data survival."""
+        # Build old-schema DB with a real price row
+        conn = sqlite3.connect(str(tmp_path / "old.db"))
+        conn.executescript(BASE_SQL.read_text())
+        conn.execute("INSERT INTO items (name, category) VALUES ('Flour', 'Dry')")
+        # Vendors are seeded by 000_base.sql; no need to re-insert
+        item_id = conn.execute("SELECT id FROM items").fetchone()[0]
+        vendor_id = conn.execute("SELECT id FROM vendors").fetchone()[0]
+        conn.execute(
+            "INSERT INTO price_history (item_id, vendor_id, price, unit) "
+            "VALUES (?, ?, 18.00, 'Bag')", (item_id, vendor_id))
+        # An order so savings_vs_alt / lines_without_alt get stamped
+        conn.execute(
+            "INSERT INTO orders (status, total_amount) VALUES ('completed', 18.00)")
+        order_id = conn.execute("SELECT MAX(id) FROM orders").fetchone()[0]
+        conn.execute(
+            """INSERT INTO order_items
+               (order_id, item_id, vendor_id, quantity, unit_price, total_price)
+               VALUES (?, ?, ?, 1, 'Bag', 18.00)""",
+            (order_id, item_id, vendor_id))
+        conn.commit()
+        conn.close()
+
+        db = Database(db_path=tmp_path / "old.db")
+        db.init_database()
+
+        from core.database import SCHEMA_VERSION
+        with db.get_connection() as conn:
+            uv = conn.execute("PRAGMA user_version").fetchone()[0]
+            assert uv == SCHEMA_VERSION
+
+            cols = [r[1] for r in conn.execute(
+                "PRAGMA table_info(orders)").fetchall()]
+            assert "savings_vs_alt" in cols
+            assert "lines_without_alt" in cols
+            assert "savings_basis" in cols
+
+        # Data survived
+        prices = db.get_latest_prices("Flour")
+        assert len(prices) == 1 and prices[0]["price"] == pytest.approx(18.0)

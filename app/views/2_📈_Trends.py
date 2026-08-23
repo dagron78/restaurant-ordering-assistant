@@ -26,13 +26,10 @@ st.markdown("*Analyze pricing history, track savings, and identify opportunities
 
 # Initialize
 db = Database()
-try:
-    engine = RecommendationEngine()
-except ValueError:
-    st.error("🔑 **Gemini API key is not configured.** This page needs it to "
-             "score trends and recommendations.")
-    st.info("Copy `.env.example` to `.env`, set `GOOGLE_API_KEY`, then restart the app.")
-    st.stop()
+engine = RecommendationEngine()
+
+if engine.ai is None:
+    st.caption("💡 Add a Gemini API key to enable AI-scored trend analysis.")
 
 # Load custom CSS
 css_path = Path(__file__).parent.parent / 'assets' / 'style.css'
