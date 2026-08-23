@@ -292,6 +292,7 @@ establishes intent, not outcome.
 | F-38 | Fixed in Phase 6: all 65 print() calls converted to module loggers (warning+ inside except blocks); timestamped basicConfig at every entrypoint; CI `warnings` job runs the suite with Deprecation/Future warnings as errors |
 | F-40 | Fixed in #5 (non-root container, SCRAPE_DAY guard, scrape delay, safe upload names) |
 | Post-review A/B/C/D/E | All fixed as noted above |
+| Test count correction | Commit e4c2f8a records '231 passing'; actual count at that point was 243. The wrong number is in the commit message and cannot be amended post-push. Correct count as of master @ 972208f: 243 passing, 1 skipped (live), 4 deselected (slow_ui). Always read counts off the run output, never from memory or prior commits |
 
 Still genuinely open (deliberately):
 - **F-16 remainder**: AppTest UI tests written but marked `slow_ui`
