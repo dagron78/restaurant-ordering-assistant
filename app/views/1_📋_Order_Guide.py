@@ -32,14 +32,11 @@ st.markdown("*AI-powered recommendations based on prices and your preferences*")
 def get_engine():
     return RecommendationEngine()
 
-try:
-    engine = get_engine()
-except ValueError:
-    st.error("🔑 **Gemini API key is not configured.** The Order Guide needs "
-             "it to build recommendations.")
-    st.info("Copy `.env.example` to `.env`, set `GOOGLE_API_KEY`, then restart the app.")
-    st.stop()
+engine = get_engine()
 db = Database()
+
+if engine.ai is None:
+    st.caption("💡 Add a Gemini API key to use natural-language ordering rules.")
 
 # Refresh button
 col1, col2, col3 = st.columns([1, 1, 4])

@@ -25,18 +25,31 @@ class RecommendationEngine:
     - User-defined preferences
     """
     
-    def __init__(self, db: Database = None, ai: GeminiEngine = None):
+    def __init__(self, db: Database = None, ai=None):
         """
         Initialize the recommendation engine.
         
         Args:
             db: Database instance (creates new if not provided)
-            ai: GeminiEngine instance (creates new if not provided)
+            ai: AI engine instance (creates GeminiEngine if key available;
+                degrades to None without one — ranking, savings and order
+                building all work without it, only natural-language rule
+                parsing requires the model)
         """
         self.db = db or Database()
-        self.ai = ai or GeminiEngine()
+        self._ai = ai
         self.preferences: List[Dict] = []
         self._preferences_loaded = False
+
+    @property
+    def ai(self):
+        """Lazy AI: constructed on first use, None when no key is set."""
+        if self._ai is None:
+            try:
+                self._ai = GeminiEngine()
+            except ValueError:
+                return None
+        return self._ai
     
     def load_preferences(self, preferences_file: Path = None,
                          force: bool = False) -> List[Dict]:
@@ -72,12 +85,20 @@ class RecommendationEngine:
                 return self.preferences
 
             if text.strip():
-                self.preferences = self.ai.parse_preferences(text)
-                self.db.save_preferences(self.preferences,
-                                         source_hash=file_hash)
+                if self.ai is None:
+                    log.info("No AI engine available - reading stored rules only")
+                    self.preferences = self._normalize_rule_rows(
+                        self.db.get_preferences())
+                else:
+                    self.preferences = self.ai.parse_preferences(text)
+                    self.db.save_preferences(self.preferences,
+                                             source_hash=file_hash)
+                    self.preferences = self._normalize_rule_rows(
+                        self.db.get_preferences())
+            else:
+                self.preferences = self._normalize_rule_rows(
+                    self.db.get_preferences())
 
-            self.preferences = self._normalize_rule_rows(
-                self.db.get_preferences())
             self._preferences_loaded = True
             return self.preferences
 

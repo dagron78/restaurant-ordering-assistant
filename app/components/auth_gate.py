@@ -35,6 +35,10 @@ def render_login():
     # Open access: warn but do NOT emit the data-preauth marker — the
     # marker hides the sidebar, and hiding navigation from a user who
     # was never asked for a password makes the app unusable (#37).
+    if st.session_state.get("_login_rendered"):
+        return                                    # already warned this run
+    st.session_state["_login_rendered"] = True
+
     if not Config.APP_PASSWORD:
         st.warning(
             "🔓 **No APP_PASSWORD is set.** Anyone who can reach this app "
