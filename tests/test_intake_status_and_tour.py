@@ -107,11 +107,6 @@ class TestTourRendersFourSteps:
         # Four screens defined → four distinct titles across navigation
         # (verified by test_tour_next_advances_to_screen_2 below)
 
-    @pytest.mark.xfail(reason='AppTest cannot drive st.rerun() for multi-step flows', strict=True)
-    @pytest.mark.xfail(
-        reason="AppTest cannot drive st.rerun() for multi-step "
-               "session_state flows — browser walkthrough covers this",
-        strict=True)
     def test_tour_next_advances_to_screen_2(self, tmp_path):
         db = Database(db_path=tmp_path / "tour2.db")
         db.init_database()
