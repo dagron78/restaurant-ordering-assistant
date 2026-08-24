@@ -16,8 +16,6 @@ kitchen ends up missing three items nobody noticed.
 
 import csv
 import importlib
-import pathlib
-import sys
 
 import pytest
 

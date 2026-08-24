@@ -138,6 +138,7 @@ if not is_authenticated():
 
 pages = [
     st.Page(home_dashboard, title="Home", icon="🏠", default=True),
+    st.Page("views/5_📝_Order_Sheet.py", title="Order Sheet", icon="📝"),
     st.Page("views/1_📋_Order_Guide.py", title="Order Guide", icon="📋"),
     st.Page("views/2_📈_Trends.py", title="Trends", icon="📈"),
     st.Page("views/3_⚙️_Settings.py", title="Settings", icon="⚙️"),
