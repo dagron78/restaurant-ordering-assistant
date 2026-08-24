@@ -24,7 +24,7 @@ single largest gap between this build and a working weekly cycle.
 | | |
 |---|---|
 | Branch | `master @ f7951df`, 88 commits, 29 merged PRs |
-| Tests | 250 passing, 1 skipped (deliberate live-API test), 4 deselected |
+| Tests | 314 passing, 1 skipped (deliberate live-API test), 4 deselected — in BOTH the clean and configured environments (CI runs both legs) |
 | Python | 3.11 everywhere — `.python-version`, `requires-python`, ruff target, CI, Docker |
 | Local venv | `./venv` — **must be uv-managed 3.11**, not the Xcode 3.9 that caused #13 |
 | CI | lint · tests · docker build · warnings-as-errors |
