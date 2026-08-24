@@ -16,7 +16,6 @@ import pandas as pd
 import streamlit as st
 
 from app.components.auth_gate import gate_or_stop
-from core.ai_engine import GeminiEngine
 from core.config import Config
 from core.database import Database
 from core.exports import build_order_pdf
@@ -409,8 +408,8 @@ def render_module_3():
 
     # Sticky Running Total Demo
     if order_lines:
-        tot_spent = sum(l["total"] for l in order_lines)
-        tot_saved = sum(l["savings"] for l in order_lines)
+        tot_spent = sum(line["total"] for line in order_lines)
+        tot_saved = sum(line["savings"] for line in order_lines)
         st.markdown("---")
         st.subheader("📊 Live Order Basket Totals")
         rc1, rc2, rc3 = st.columns(3)
@@ -433,13 +432,13 @@ def render_module_3():
                     "groups": [
                         {
                             "vendor": "Sysco",
-                            "lines": [{"item": l["item"], "qty": l["qty"], "unit": l["unit"], "unit_price": l["unit_price"], "total": l["total"]} for l in order_lines if l["vendor"] == "Sysco"],
-                            "subtotal": sum(l["total"] for l in order_lines if l["vendor"] == "Sysco"),
+                            "lines": [{"item": line["item"], "qty": line["qty"], "unit": line["unit"], "unit_price": line["unit_price"], "total": line["total"]} for line in order_lines if line["vendor"] == "Sysco"],
+                            "subtotal": sum(line["total"] for line in order_lines if line["vendor"] == "Sysco"),
                         },
                         {
                             "vendor": "US Foods",
-                            "lines": [{"item": l["item"], "qty": l["qty"], "unit": l["unit"], "unit_price": l["unit_price"], "total": l["total"]} for l in order_lines if l["vendor"] == "US Foods"],
-                            "subtotal": sum(l["total"] for l in order_lines if l["vendor"] == "US Foods"),
+                            "lines": [{"item": line["item"], "qty": line["qty"], "unit": line["unit"], "unit_price": line["unit_price"], "total": line["total"]} for line in order_lines if line["vendor"] == "US Foods"],
+                            "subtotal": sum(line["total"] for line in order_lines if line["vendor"] == "US Foods"),
                         },
                     ],
                     "total": tot_spent,
