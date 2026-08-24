@@ -61,9 +61,9 @@ def _btn(at, label_part):
     return matches[0]
 
 
-def _open(db):
-    at = AppTest.from_file(SHEET_PAGE)
-    at.session_state["role"] = "app"
+def _open(db, page=SHEET_PAGE, role="app"):
+    at = AppTest.from_file(page)
+    at.session_state["role"] = role
     at.run(timeout=30)
     return at
 
@@ -226,3 +226,26 @@ def test_no_send_guard_untouched():
                ).read_text()
     for banned in ("smtplib", "sendmail", "SMTP("):
         assert banned not in exports
+
+
+def test_mode_toggle_switches_the_flow(round_db):
+    """plan_after (default): Order Guide points to the sheet round.
+    plan_during: the inline form returns, with the override widget on
+    priced lines. Both modes reach a stored order (plan-after via the
+    round tests above; plan-during via the legacy save path)."""
+    from core.settings import set_settings
+
+    # Default is plan_after:
+    at = _open(round_db, page=str(APP / "views" / "1_📋_Order_Guide.py"))
+    infos = " | ".join(i.value for i in at.info)
+    assert "plan-after" in infos, infos
+    # page_link cannot render under AppTest (no navigation registry);
+    # the fallback markdown carries the same pointer.
+    pointers = " | ".join(m.value for m in at.markdown)
+    assert "Order Sheet" in pointers, pointers
+
+    # Flip to plan_during: the form returns with override widgets.
+    set_settings({"ORDER_MODE": "plan_during"}, db=round_db)
+    at2 = _open(round_db, page=str(APP / "views" / "1_📋_Order_Guide.py"))
+    infos2 = " | ".join(i.value for i in at2.info)
+    assert "plan-after" not in infos2

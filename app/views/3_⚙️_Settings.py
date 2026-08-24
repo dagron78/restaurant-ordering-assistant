@@ -595,6 +595,27 @@ with tab5:
 
     st.divider()
 
+    # ---- Ordering round (Phase C) ---------------------------------------
+    st.subheader("🧭 Ordering round")
+    with st.form("cfg_order_mode", border=True):
+        mode = st.radio(
+            "Ordering mode",
+            options=["plan_after", "plan_during"],
+            format_func=lambda m: (
+                "Plan-after (default): walk the sheet → Send → suggested "
+                "plan → override → confirm"
+                if m == "plan_after" else
+                "Plan-during: prices and best vendor inline while entering "
+                "quantities (Order Guide)"),
+            index=0 if get_setting("ORDER_MODE", db=db) == "plan_after"
+            else 1,
+            horizontal=True)
+        if st.form_submit_button("Save ordering mode", type="primary"):
+            set_settings({"ORDER_MODE": mode}, db=db)
+            st.success("Ordering mode saved — effective immediately.")
+
+    st.divider()
+
     # ---- Passwords ------------------------------------------------------
     st.subheader("🔐 Passwords")
     col_admin_pw, col_app_pw = st.columns(2)
