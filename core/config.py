@@ -1,8 +1,24 @@
 """
 Configuration management for Restaurant Ordering Assistant.
 
-Loads settings from environment variables and provides
-centralized access to all configuration values.
+Phase A (issue #50): configuration is DATA, not import-time constants.
+
+Bootstrap keys — the ones needed to boot far enough to read everything
+else — still come from the environment:
+
+    DATABASE_PATH             where the SQLite file lives
+    INITIAL_ADMIN_PASSWORD    consumed once, at first-run seeding
+
+Everything else is a row in the `settings` table behind the admin
+password, resolved live on every read (see core/settings.py). That live
+resolution is what makes a changed setting take effect on the next page
+run without a restart: there is no snapshot anywhere to go stale.
+
+Attribute mechanics: each managed key sits in the class body as a
+_Settings descriptor whose __get__ consults the store. Assigning over one
+(e.g. tests monkeypatching) shadows the descriptor with a plain value;
+tests/conftest.py reinstates every descriptor after each test, so an
+override can never leak from one test into another.
 """
 
 import os
@@ -13,53 +29,76 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+class _Settings:
+    """Descriptor resolving a managed settings key live on every read."""
+
+    def __init__(self, key: str):
+        self.key = key
+
+    def __get__(self, obj, objtype=None):
+        from .settings import get_setting
+
+        return get_setting(self.key)
+
+    def __repr__(self):
+        return f"_Settings({self.key!r})"
+
+
 class Config:
     """Centralized configuration management."""
-    
+
     # Base paths
     BASE_DIR = Path(__file__).parent.parent
-    
-    # Google Gemini API
-    GOOGLE_API_KEY: str = os.getenv('GOOGLE_API_KEY', '')
-    
-    # Gemini models (gemini-1.5-* are retired)
-    GEMINI_MODEL_FLASH: str = os.getenv('GEMINI_MODEL_FLASH', 'gemini-2.5-flash')
-    GEMINI_MODEL_PRO: str = os.getenv('GEMINI_MODEL_PRO', 'gemini-2.5-pro')
-    
-    # Email configuration
-    EMAIL_USER: str = os.getenv('EMAIL_USER', '')
-    EMAIL_PASS: str = os.getenv('EMAIL_PASS', '')
-    EMAIL_IMAP_SERVER: str = os.getenv('EMAIL_IMAP_SERVER', 'imap.gmail.com')
-    EMAIL_CHECK_INTERVAL: int = int(os.getenv('EMAIL_CHECK_INTERVAL', '8'))
-    
-    # File paths
+
+    # Bootstrap-only environment reads. Everything below the separator
+    # lives in the settings table — see core/settings.py for the typed
+    # registry these descriptors resolve through.
     DATABASE_PATH: Path = BASE_DIR / os.getenv('DATABASE_PATH', 'data/restaurant_data.db')
-    PREFERENCES_PATH: Path = BASE_DIR / os.getenv('PREFERENCES_PATH', 'data/preferences.txt')
-    SESSIONS_PATH: Path = BASE_DIR / os.getenv('SESSIONS_PATH', 'data/sessions')
-    TEMP_PATH: Path = BASE_DIR / os.getenv('TEMP_PATH', 'data/temp')
+
+    @staticmethod
+    def initial_admin_password() -> str:
+        """One-time admin password placed by the installer in .env.
+
+        Consumed by first-run seeding; once an admin password hash exists
+        in the settings table this value is ignored.
+        """
+        return os.getenv('INITIAL_ADMIN_PASSWORD', '')
+
+    # ---------------------------------------------------------------
+    # Live settings — rows in the `settings` table, admin-editable.
+    # ---------------------------------------------------------------
+    GOOGLE_API_KEY = _Settings("GOOGLE_API_KEY")
+    GEMINI_MODEL_FLASH = _Settings("GEMINI_MODEL_FLASH")
+    GEMINI_MODEL_PRO = _Settings("GEMINI_MODEL_PRO")
+
+    EMAIL_USER = _Settings("EMAIL_USER")
+    EMAIL_PASS = _Settings("EMAIL_PASS")
+    EMAIL_IMAP_SERVER = _Settings("EMAIL_IMAP_SERVER")
+    EMAIL_CHECK_INTERVAL = _Settings("EMAIL_CHECK_INTERVAL")
+
+    PREFERENCES_PATH = _Settings("PREFERENCES_PATH")
+    SESSIONS_PATH = _Settings("SESSIONS_PATH")
+    TEMP_PATH = _Settings("TEMP_PATH")
+
+    SCRAPE_DAY = _Settings("SCRAPE_DAY")
+    SCRAPE_HOUR = _Settings("SCRAPE_HOUR")
+    SCRAPE_DELAY_SECS = _Settings("SCRAPE_DELAY_SECS")
+
+    TREND_DAYS = _Settings("TREND_DAYS")
+    SPIKE_THRESHOLD = _Settings("SPIKE_THRESHOLD")
+    DEAL_THRESHOLD = _Settings("DEAL_THRESHOLD")
+
+    # ---------------------------------------------------------------
+    # Static application constants (not operator settings)
+    # ---------------------------------------------------------------
     SCHEMA_PATH: Path = BASE_DIR / 'scripts' / 'schema.sql'
-    
-    # Scheduling
-    SCRAPE_DAY: int = int(os.getenv('SCRAPE_DAY', '0'))  # 0=Monday
-    SCRAPE_HOUR: int = int(os.getenv('SCRAPE_HOUR', '4'))
-    
-    # Pause between per-item page loads during a scrape (seconds)
-    SCRAPE_DELAY_SECS: float = float(os.getenv('SCRAPE_DELAY_SECS', '2'))
-    
-    # Optional app password. When set, every UI page requires it.
-    APP_PASSWORD: str = os.getenv('APP_PASSWORD', '')
-    
+
     # Price list keywords for email filtering
     PRICE_LIST_KEYWORDS: list = ['price', 'catalog', 'list', 'quote', 'invoice', 'pricing']
-    
+
     # Valid attachment extensions
     VALID_EXTENSIONS: list = ['.pdf', '.jpg', '.jpeg', '.png', '.xlsx', '.xls', '.csv']
-    
-    # Trend analysis settings
-    TREND_DAYS: int = 30  # Days to consider for rolling average
-    SPIKE_THRESHOLD: float = 0.10  # 10% increase = spike
-    DEAL_THRESHOLD: float = -0.10  # 10% decrease = deal
-    
+
     @classmethod
     def ensure_directories(cls) -> None:
         """Create necessary directories if they don't exist."""
@@ -70,18 +109,18 @@ class Config:
         ]
         for directory in directories:
             directory.mkdir(parents=True, exist_ok=True)
-    
+
     @classmethod
     def get_session_file(cls, vendor_name: str) -> Path:
         """Get the session file path for a specific vendor."""
         safe_name = vendor_name.lower().replace(' ', '_')
         return cls.SESSIONS_PATH / f"{safe_name}_auth.json"
-    
+
     @classmethod
     def validate(cls) -> dict:
         """
         Validate configuration and return status.
-        
+
         Returns:
             dict with validation results for each config section
         """

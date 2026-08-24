@@ -11,14 +11,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from app.components.auth_gate import gate_or_stop
+from app.components.resources import get_engine, get_database
 
 import streamlit as st
 import pandas as pd
 from datetime import datetime
 
-from core.database import Database, pick_cheapest_alternative
+from core.database import pick_cheapest_alternative
 from core.exports import build_order_pdf, build_vendor_email_draft
-from core.recommendation import RecommendationEngine
 
 
 
@@ -27,7 +27,7 @@ gate_or_stop()
 st.title("📋 Weekly Order Guide")
 st.markdown("*AI-powered recommendations based on prices and your preferences*")
 
-db = Database()
+db = get_database()
 
 # Prices last updated (#30 D): manager sees freshness BEFORE trusting recs
 _latest_scrape = max(
@@ -42,12 +42,8 @@ else:
     st.caption("\U0001F4C5 No portal scrape recorded - prices from manual entry or email")
 
 # Initialize
-@st.cache_resource
-def get_engine():
-    return RecommendationEngine()
-
 engine = get_engine()
-db = Database()
+db = get_database()
 
 if engine.ai is None:
     st.caption("💡 Add a Gemini API key to use natural-language ordering rules.")

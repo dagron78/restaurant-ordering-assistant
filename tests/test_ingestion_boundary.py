@@ -103,18 +103,22 @@ class TestSchemaPriceBounds:
 
 
 class TestAuthGateConfigSourcing:
-    """D: the gate must read APP_PASSWORD through Config so .env is always
-    loaded - not via os.getenv, which fails open if no other module has
-    imported core.config first."""
+    """Phase A (issue #50): the gate must read credentials through the
+    settings store via core.auth — never a Config.APP_PASSWORD constant
+    (removed) and never os.getenv directly (fails open if core.config was
+    not imported first)."""
 
-    def test_gate_reads_env_through_config(self):
-        assert hasattr(Config, 'APP_PASSWORD')
-        # Read the source rather than importing: auth_gate needs streamlit,
-        # which unit tests should not require
+    def test_gate_authenticates_through_the_store(self):
         gate_path = pathlib.Path(__file__).parent.parent / 'app' / 'components' / 'auth_gate.py'
         source = gate_path.read_text()
-        assert 'Config.APP_PASSWORD' in source
-        assert "os.getenv('APP_PASSWORD'" not in source
+        assert 'auth.authenticate(' in source
+        assert 'Config.APP_PASSWORD' not in source
+        assert "os.getenv" not in source
+
+    def test_config_no_longer_has_a_password_constant(self):
+        # The eager plaintext password attribute is gone by design; the
+        # only credential storage is the hashed settings table.
+        assert not hasattr(Config, 'APP_PASSWORD')
 
 
 class TestFromHeaderParsing:

@@ -185,6 +185,21 @@ CREATE TABLE IF NOT EXISTS processing_log (
 );
 
 -- ===========================================
+-- SETTINGS TABLE (Phase A · issue #50)
+-- Operator-changeable configuration lives here, written through the
+-- admin UI. One row per key; values are TEXT and typed at the accessor
+-- (core/settings.py) against the registry there. Passwords are stored
+-- ONLY as scrypt hashes. Trusted-LAN, single-tenant model: this file is
+-- as readable as the .env it replaces — the gain is writability, not
+-- secrecy.
+-- ===========================================
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ===========================================
 -- INDEXES FOR PERFORMANCE
 -- ===========================================
 CREATE INDEX IF NOT EXISTS idx_price_history_item ON price_history(item_id);

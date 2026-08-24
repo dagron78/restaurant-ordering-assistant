@@ -27,7 +27,7 @@ LATEST_PRICE_RANK_ORDER = "ph.date_recorded DESC, ph.created_at DESC, ph.id DESC
 # Highest schema version implemented by scripts/migrations/. Bump it together
 # with a new NNN_*.sql file there; PRAGMA user_version on real databases
 # records how far each one has come.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 MIGRATIONS_DIR = Config.BASE_DIR / "scripts" / "migrations"
 
 
@@ -72,6 +72,24 @@ class Database:
         """
         self.db_path = db_path or Config.DATABASE_PATH
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        # Trusted-LAN single-tenant model: the settings store now holds the
+        # API key and mailbox password. Tighten the file so only the owning
+        # user reads it — parity with a 0600 .env, stated in docs rather
+        # than implied encryption.
+        self._harden_permissions()
+
+    def _harden_permissions(self) -> None:
+        """Best-effort owner-only permissions on the database and its WAL
+        sidecars. Never fatal on filesystems that do not support it."""
+        try:
+            import os
+
+            for suffix in ("", "-wal", "-shm"):
+                target = Path(str(self.db_path) + suffix)
+                if target.exists():
+                    os.chmod(target, 0o600)
+        except OSError:
+            pass
     
     @contextmanager
     def get_connection(self):
@@ -290,6 +308,32 @@ class Database:
                 "UPDATE vendors SET session_expires = ? WHERE id = ?",
                 (expires.isoformat(), vendor_id)
             )
+
+    def update_vendor_details(self, vendor_id: int, email_domain: str = None,
+                              scrape_url: str = None,
+                              scrape_enabled: bool = None) -> None:
+        """
+        Update operator-editable vendor fields (Phase A · issue #50).
+
+        Only provided fields are written; None leaves a field untouched.
+        """
+        assignments, params = [], []
+        if email_domain is not None:
+            assignments.append("email_domain = ?")
+            params.append(email_domain.strip() or None)
+        if scrape_url is not None:
+            assignments.append("scrape_url = ?")
+            params.append(scrape_url.strip() or None)
+        if scrape_enabled is not None:
+            assignments.append("scrape_enabled = ?")
+            params.append(1 if scrape_enabled else 0)
+        if not assignments:
+            return
+        params.append(vendor_id)
+        with self.get_connection() as conn:
+            conn.execute(
+                f"UPDATE vendors SET {', '.join(assignments)} WHERE id = ?",
+                params)
     
     # ==========================================
     # PRICE HISTORY OPERATIONS

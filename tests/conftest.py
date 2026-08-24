@@ -9,6 +9,25 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.database import Database  # noqa: E402
+from core.config import Config, _Settings  # noqa: E402
+
+# Pristine descriptor set — reinstated after every test so a shadowing
+# write (monkeypatch or direct assignment) can never leak between tests.
+_LIVE_DESCRIPTORS = {
+    name: attr for name, attr in vars(Config).items()
+    if isinstance(attr, _Settings)
+}
+
+
+@pytest.fixture(autouse=True)
+def _restore_live_config_descriptors():
+    """Any test that shadows a live Config descriptor gets the real one
+    back afterwards. This is what stops one test's config from poisoning
+    another — the failure class PR #51 fixed for APP_PASSWORD."""
+    yield
+    for name, desc in _LIVE_DESCRIPTORS.items():
+        if vars(Config).get(name) is not desc:
+            setattr(Config, name, desc)
 
 
 @pytest.fixture()

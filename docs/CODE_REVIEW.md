@@ -271,7 +271,7 @@ establishes intent, not outcome.
 | F-24 | **Partially** fixed in #5 (desktop keys only — card view's `qty_mobile_*` kept old quantities; status was wrongly Fixed from the diff, see provenance note) → fully fixed in Phase 1 (#15) via form-version key rotation, browser-verified |
 | F-08 | Fixed in #3 (defaults gemini-2.5-*, env-overridable); SDK migration still open below |
 | F-09 | Fixed in #4; hardened further in #5 (parseaddr header parsing, finding E) |
-| F-10 | Fixed in #5 (APP_PASSWORD gate); documented no-lockout trade-off |
+| F-10 | Fixed in #5 (APP_PASSWORD gate); documented no-lockout trade-off. **Phase A (#50) supersession:** the spec makes LAN exposure a *requirement* (phones on restaurant wifi), so the shared password is no longer a mitigation — it IS the security model, now split into app/admin roles, settable in-app, with first-run setup replacing open access |
 | F-11 / F-36 | Fixed in #4 |
 | F-39 | **Partially fixed in #4** — only the Gmail "less secure apps" advice. The `.python-version` 3.10.13 vs Dockerfile 3.11 mismatch stayed open and caused issue #13; resolved by making 3.11 authoritative everywhere. The `reportlab` part closed in Phase 5: the PDF export shipped and reportlab is a real dependency again. |
 | F-12 | Fixed in #5 (credentials removed entirely) |

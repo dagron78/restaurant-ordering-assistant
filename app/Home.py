@@ -15,8 +15,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import streamlit as st
 
-from core.config import Config
-from core.database import Database
+from core import auth
+from app.components.resources import get_database
 from app.components.auth_gate import is_authenticated, render_login
 
 logging.basicConfig(level=logging.INFO,
@@ -29,16 +29,11 @@ st.set_page_config(
 )
 
 
-@st.cache_resource
-def get_database():
-    """Get cached database instance."""
-    db = Database()
-    if not Config.DATABASE_PATH.exists():
-        db.init_database()
-    return db
-
-
 db = get_database()
+
+# One-time adoption of the installer's INITIAL_ADMIN_PASSWORD, if any.
+# No-op once an admin password exists in the settings store.
+auth.bootstrap_initial_admin(db=db)
 
 
 def load_css():
@@ -138,7 +133,8 @@ def home_dashboard():
 load_css()
 
 if not is_authenticated():
-    render_login()          # draws gate + marker; stops execution
+    render_login()   # never returns while unauthenticated; belt below anyway
+    st.stop()
 
 pages = [
     st.Page(home_dashboard, title="Home", icon="🏠", default=True),
