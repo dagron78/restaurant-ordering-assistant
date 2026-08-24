@@ -56,16 +56,18 @@ def test_supplied_baseline_stored_not_reresolved(priced_world, db):
     snapshot said: Sysco 24.50, alt = US Foods @ 28.00 -> saves 3.50/case.
     US Foods then DROPS to 20.00 before confirm. The stored order must
     record the confirmed savings (vs 28.00), not the live market
-    (vs 20.00 would show a negative)."""
+    (vs 20.00 would show a negative). The market has ALREADY moved when
+    create_order runs — that is what makes the test discriminate a
+    stored snapshot from a live re-resolution."""
+    # The market moves after Send, before Confirm:
+    db.add_price("Heavy Cream", "US Foods", 20.00, "Case")
+
     line = {"item_id": priced_world["hc"], "vendor_id": priced_world["sysco"],
             "quantity": 2, "unit": "Case", "unit_price": 24.50,
             "alt_vendor_id": priced_world["usf"], "alt_price": 28.00}
     result = db.create_order([line], status="completed")
     order = db.get_order(result["order_id"])
     assert order["savings_vs_alt"] == pytest.approx(7.00)   # 2 x (28 - 24.50)
-
-    # The market moves before confirm: US Foods drops to 20.00.
-    db.add_price("Heavy Cream", "US Foods", 20.00, "Case")
 
     # The same call WITHOUT a supplied baseline re-resolves live:
     live = dict(line)

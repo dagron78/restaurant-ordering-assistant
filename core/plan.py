@@ -56,6 +56,11 @@ def build_plan(db, quantities: Dict[str, float],
 
     engine = engine or RecommendationEngine(db=db)
     recommendations = engine.generate_order_guide()
+
+    # all_prices rows carry vendor NAMES only; the alt baseline needs the
+    # id (create_order stores alt_vendor_id). One name->id index per plan.
+    vendor_ids = {v["name"]: v["id"] for v in db.get_all_vendors()}
+
     by_name = {}
     for rec in recommendations:
         by_name.setdefault(rec.get("item"), rec)
@@ -67,8 +72,9 @@ def build_plan(db, quantities: Dict[str, float],
         if not rec or not rec.get("vendor_id") or rec.get("price") is None:
             unpriced.append(name)
             continue
-        alt = rec.get("alt") or _alt_from_prices(
-            rec.get("all_prices") or [], rec["recommended_vendor"])
+        enriched = [dict(p, vendor_id=vendor_ids.get(p.get("vendor")))
+                    for p in (rec.get("all_prices") or [])]
+        alt = _alt_from_prices(enriched, rec["recommended_vendor"])
         lines.append({
             "item_id": rec.get("item_id"),
             "name": name,
