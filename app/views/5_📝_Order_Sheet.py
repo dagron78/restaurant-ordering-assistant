@@ -25,6 +25,7 @@ import streamlit as st
 from app.components.auth_gate import gate_or_stop
 from app.components.resources import get_database
 from core import order_sheet
+from core.config import Config
 from core.order_sheet import (
     SheetMapping,
     UnsupportedDocumentError,
@@ -270,8 +271,11 @@ with tab_import:
 
     grid = st.session_state.get("sheet_grid")
     if uploaded is not None:
-        tmp = Path("data") / f"upload_sheet_{uploaded.name}"
-        tmp.parent.mkdir(parents=True, exist_ok=True)
+        # Temp files go to the configured TEMP_PATH (gitignored), never
+        # data/ itself — a leaked upload once committed a real kitchen
+        # spreadsheet (fixed in Phase C).
+        Config.TEMP_PATH.mkdir(parents=True, exist_ok=True)
+        tmp = Config.TEMP_PATH / f"upload_sheet_{uploaded.name}"
         tmp.write_bytes(uploaded.getvalue())
         try:
             st.session_state["sheet_grid"] = grid = read_grid(tmp)

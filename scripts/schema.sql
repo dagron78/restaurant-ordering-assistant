@@ -130,6 +130,11 @@ CREATE TABLE IF NOT EXISTS order_items (
     savings_basis TEXT NOT NULL DEFAULT 'vs_alt'
         CHECK(savings_basis IN ('vs_alt', 'unknown_legacy', 'no_alternative')),
     savings_vs_alt REAL NOT NULL DEFAULT 0,
+    -- Phase C (issue #55): who picked the vendor. 'engine' = the
+    -- recommendation; 'manager' = a human override (savings computed
+    -- against what was actually chosen, negatives preserved).
+    chosen_by TEXT NOT NULL DEFAULT 'engine'
+        CHECK(chosen_by IN ('engine', 'manager')),
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
     FOREIGN KEY (item_id) REFERENCES items(id),
     FOREIGN KEY (vendor_id) REFERENCES vendors(id)
@@ -229,6 +234,22 @@ CREATE TABLE IF NOT EXISTS sheet_mappings (
     columns_json TEXT NOT NULL,
     header_texts_json TEXT NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ===========================================
+-- PLAN DRAFTS TABLE (Phase C · issue #55)
+-- Server-side draft of the ordering round: sheet quantities and the
+-- SENT plan snapshot (vendor, unit_price AND alt baseline per line).
+-- Survives phone screen locks; confirm stores exactly what was shown.
+-- One open draft at a time; confirmed drafts are never resurrected.
+-- ===========================================
+CREATE TABLE IF NOT EXISTS plan_drafts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    status TEXT NOT NULL DEFAULT 'entering'
+        CHECK(status IN ('entering', 'plan_ready', 'confirmed')),
+    payload TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 -- ===========================================
