@@ -200,6 +200,38 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 
 -- ===========================================
+-- ORDER SHEET TABLE (Phase B · issue #53)
+-- The kitchen's standing list as a first-class entity: one row per item
+-- the manager actually orders. NOT columns on items — items is the
+-- catalogue email intake grows; sheet membership is the manager's fact.
+-- par_level NULL = no par set; 0 = stocked but not normally reordered
+-- (the distinction is load-bearing).
+-- ===========================================
+CREATE TABLE IF NOT EXISTS order_sheet (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id INTEGER NOT NULL UNIQUE REFERENCES items(id) ON DELETE CASCADE,
+    par_level REAL,
+    sheet_position INTEGER,
+    added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ===========================================
+-- SHEET MAPPINGS TABLE (Phase B · issue #53)
+-- Stored column mappings for spreadsheet import: named, admin-visible,
+-- deletable. header_texts_json records the header cells the mapping was
+-- built from so a re-import knows whether it still applies.
+-- ===========================================
+CREATE TABLE IF NOT EXISTS sheet_mappings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL,
+    header_row INTEGER NOT NULL,
+    columns_json TEXT NOT NULL,
+    header_texts_json TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ===========================================
 -- INDEXES FOR PERFORMANCE
 -- ===========================================
 CREATE INDEX IF NOT EXISTS idx_price_history_item ON price_history(item_id);
@@ -212,6 +244,7 @@ CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_orders_date ON orders(order_date);
 CREATE INDEX IF NOT EXISTS idx_savings_summary_period ON savings_summary(period_start, period_end);
 CREATE INDEX IF NOT EXISTS idx_savings_summary_type ON savings_summary(period_type);
+CREATE INDEX IF NOT EXISTS idx_order_sheet_position ON order_sheet(sheet_position);
 
 -- ===========================================
 -- INITIAL DATA - DEFAULT VENDORS

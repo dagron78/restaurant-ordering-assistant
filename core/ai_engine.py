@@ -142,9 +142,27 @@ class GeminiEngine:
         [{{"item_name": "Heavy Cream", "price": 24.50, "unit": "Case", "vendor": "Sysco"}}]
         """
         
+        # Route by kind BEFORE anything reaches the model: spreadsheets
+        # are structured data and belong to the deterministic importer
+        # (core/order_sheet.py) — sending one to Gemini would be slower,
+        # key-dependent, and able to hallucinate a quantity. Unsupported
+        # types fail with a message for the person holding the file,
+        # never a PIL traceback (issue #53).
+        from .order_sheet import route_document_kind, UnsupportedDocumentError
+
+        kind = route_document_kind(file_path)
+        if kind == "spreadsheet":
+            raise UnsupportedDocumentError(
+                f"'{file_path.name}' is a spreadsheet. Import it on the "
+                "Order Sheet page — it is parsed locally, no AI needed.")
+        if kind == "unsupported":
+            raise UnsupportedDocumentError(
+                f"'{file_path.name}' is not a supported document type "
+                f"(expected .pdf, an image, or .xlsx/.csv).")
+
         # PDFs cannot be opened with PIL; send raw bytes with a MIME type.
         # Gemini accepts inline parts for both images and PDFs.
-        if file_path.suffix.lower() == '.pdf':
+        if kind == "pdf":
             document = [gtypes.Part.from_bytes(
                 data=file_path.read_bytes(),
                 mime_type='application/pdf')]

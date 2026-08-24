@@ -27,7 +27,7 @@ LATEST_PRICE_RANK_ORDER = "ph.date_recorded DESC, ph.created_at DESC, ph.id DESC
 # Highest schema version implemented by scripts/migrations/. Bump it together
 # with a new NNN_*.sql file there; PRAGMA user_version on real databases
 # records how far each one has come.
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 MIGRATIONS_DIR = Config.BASE_DIR / "scripts" / "migrations"
 
 
@@ -213,6 +213,13 @@ class Database:
             
             return cursor.lastrowid
     
+    def update_item_unit(self, item_id: int, default_unit: str) -> None:
+        """Set an item's default unit (order-sheet import fills blanks;
+        it never overwrites a unit already known)."""
+        with self.get_connection() as conn:
+            conn.execute("UPDATE items SET default_unit = ? WHERE id = ?",
+                         (default_unit, item_id))
+
     def get_item(self, item_id: int = None, name: str = None) -> Optional[Dict]:
         """Get item by ID or name."""
         with self.get_connection() as conn:
@@ -242,6 +249,127 @@ class Database:
                     "SELECT * FROM items ORDER BY category, name"
                 )
             return [dict(row) for row in cursor.fetchall()]
+
+    # ==========================================
+    # ORDER SHEET (Phase B · issue #53)
+    # The kitchen's standing list as a first-class entity. Membership is
+    # the manager's fact, granted by import or explicit edit — never a
+    # side effect of items existing.
+    # ==========================================
+
+    def get_order_sheet(self) -> List[Dict]:
+        """Sheet rows joined with their items, in the kitchen's own order.
+
+        Position NULLs sort last (imports always assign positions, so
+        NULLs only exist for hand-added rows)."""
+        with self.get_connection() as conn:
+            cursor = conn.execute(
+                """SELECT os.item_id, os.par_level, os.sheet_position,
+                          os.updated_at, i.name, i.default_unit, i.category
+                   FROM order_sheet os
+                   JOIN items i ON i.id = os.item_id
+                   ORDER BY (os.sheet_position IS NULL),
+                            os.sheet_position, i.name"""
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_sheet_entry(self, item_id: int) -> Optional[Dict]:
+        """One sheet row, or None when the item is not on the sheet."""
+        with self.get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM order_sheet WHERE item_id = ?", (item_id,)
+            ).fetchone()
+            return dict(row) if row else None
+
+    def upsert_sheet_row(self, item_id: int, par_level: Optional[float],
+                         sheet_position: Optional[int] = None) -> None:
+        """Put an item on the sheet or update its row.
+
+        par_level is the FULL value: a float, 0 (meaningful), or None
+        (no par set). Callers must pass the intended value — there is no
+        "leave unchanged" sentinel here, so a falsy check upstream can
+        never collapse 0 into absent.
+        """
+        with self.get_connection() as conn:
+            conn.execute(
+                """INSERT INTO order_sheet (item_id, par_level, sheet_position)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(item_id) DO UPDATE SET
+                       par_level = excluded.par_level,
+                       sheet_position = COALESCE(excluded.sheet_position,
+                                                 order_sheet.sheet_position),
+                       updated_at = CURRENT_TIMESTAMP""",
+                (item_id, par_level, sheet_position),
+            )
+
+    def update_sheet_par(self, item_id: int, par_level: Optional[float]) -> None:
+        """Edit one par. Same contract as upsert_sheet_row: pass the FULL
+        intended value — 0 survives, None means absent."""
+        self.upsert_sheet_row(item_id, par_level, None)
+
+    def remove_from_order_sheet(self, item_id: int) -> None:
+        """Take an item off the sheet. Explicit manager action — a
+        re-import never removes rows the file did not mention."""
+        with self.get_connection() as conn:
+            conn.execute("DELETE FROM order_sheet WHERE item_id = ?",
+                         (item_id,))
+
+    # ==========================================
+    # SHEET MAPPINGS (Phase B · issue #53)
+    # Named, admin-visible, deletable column mappings. An invisible
+    # mapping that is subtly wrong becomes undebuggable; these are
+    # configuration, not magic.
+    # ==========================================
+
+    def save_sheet_mapping(self, name: str, header_row: int,
+                           columns: Dict[str, int],
+                           header_texts: Dict[str, str]) -> None:
+        """Upsert a mapping by name. columns are 0-based grid indices."""
+        import json
+
+        with self.get_connection() as conn:
+            conn.execute(
+                """INSERT INTO sheet_mappings
+                       (name, header_row, columns_json, header_texts_json)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(name) DO UPDATE SET
+                       header_row = excluded.header_row,
+                       columns_json = excluded.columns_json,
+                       header_texts_json = excluded.header_texts_json""",
+                (name, header_row, json.dumps(columns),
+                 json.dumps(header_texts)),
+            )
+
+    def get_sheet_mapping(self, name: str) -> Optional[Dict]:
+        import json
+
+        with self.get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM sheet_mappings WHERE name = ?", (name,)
+            ).fetchone()
+        if not row:
+            return None
+        return {"name": row["name"], "header_row": row["header_row"],
+                "columns": json.loads(row["columns_json"]),
+                "header_texts": json.loads(row["header_texts_json"])}
+
+    def list_sheet_mappings(self) -> List[Dict]:
+        import json
+
+        with self.get_connection() as conn:
+            rows = conn.execute(
+                "SELECT name, header_row, columns_json, header_texts_json,"
+                " created_at FROM sheet_mappings ORDER BY name"
+            ).fetchall()
+        return [{"name": r["name"], "header_row": r["header_row"],
+                 "columns": json.loads(r["columns_json"]),
+                 "header_texts": json.loads(r["header_texts_json"]),
+                 "created_at": r["created_at"]} for r in rows]
+
+    def delete_sheet_mapping(self, name: str) -> None:
+        with self.get_connection() as conn:
+            conn.execute("DELETE FROM sheet_mappings WHERE name = ?",
+                         (name,))
     
     def get_vendor(self, vendor_id: int = None, name: str = None) -> Optional[Dict]:
         """Get vendor by ID or name."""
