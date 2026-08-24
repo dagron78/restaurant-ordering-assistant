@@ -45,6 +45,10 @@ class TestFirstRunRouting:
     def test_unconfigured_app_offers_setup_not_open_access(
             self, tmp_path, monkeypatch):
         """Empty .env beyond the DB path: first run offers setup."""
+        # Isolate from an ambient configured environment (the CI
+        # configured-env leg sets INITIAL_ADMIN_PASSWORD): this test is
+        # about the UNCONFIGURED state, where nothing bootstraps.
+        monkeypatch.delenv("INITIAL_ADMIN_PASSWORD", raising=False)
         db = Database(db_path=tmp_path / "fresh.db")
         db.init_database()
         monkeypatch.setattr(Config, "DATABASE_PATH", db.db_path,
