@@ -37,6 +37,20 @@ from core.order_sheet import (
 gate_or_stop()
 
 db = get_database()
+
+# Outcome flash from a completed import (post-rerun so it actually
+# renders — a success banner set right before st.rerun() never shows).
+if "sheet_import_flash" in st.session_state:
+    flash = st.session_state.pop("sheet_import_flash")
+    st.success(
+        f"Imported: {len(flash['created'])} new, "
+        f"{len(flash['updated'])} updated · "
+        f"{flash['skipped_blank']} blank skipped · "
+        f"{flash['skipped_total']} total skipped · "
+        f"{len(flash['rejected'])} rejected.")
+    if flash["created"]:
+        st.write("New: " + ", ".join(flash["created"]))
+
 sheet = db.get_order_sheet()
 is_admin = st.session_state.get("role") == "admin"
 
@@ -232,17 +246,13 @@ def render_import_tab(db, grid):
             outcome = order_sheet.apply_import(db, parsed)
             db.save_sheet_mapping(mapping.name, mapping.header_row,
                                   mapping.columns, mapping.header_texts)
+            # Flash the outcome AFTER the rerun — st.success before
+            # st.rerun() never renders (the rerun wipes it), and these
+            # are the surfaced counts the gate is about.
+            st.session_state["sheet_import_flash"] = outcome
             for key in ("sheet_preview", "sheet_force_remap", "sheet_grid",
                         "sheet_filename"):
                 st.session_state.pop(key, None)
-            st.success(
-                f"Imported: {len(outcome['created'])} new, "
-                f"{len(outcome['updated'])} updated · "
-                f"{outcome['skipped_blank']} blank skipped · "
-                f"{outcome['skipped_total']} total skipped · "
-                f"{len(outcome['rejected'])} rejected.")
-            if outcome["created"]:
-                st.write("New: " + ", ".join(outcome["created"]))
             st.rerun()
     with c_remap:
         if st.button("Remap columns"):

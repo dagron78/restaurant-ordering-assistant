@@ -86,6 +86,24 @@ next page run — no restart, no file editing.
 The `.env` file is bootstrap only: `DATABASE_PATH` and the one-time
 `INITIAL_ADMIN_PASSWORD` (see `.env.example`).
 
+## The Order Sheet
+
+The kitchen's standing list lives on its own page — **Order Sheet** in
+the sidebar. Import it once from your real spreadsheet (`.xlsx` or
+`.csv`): the importer is deterministic — parsed locally, no API key,
+nothing sent anywhere — and asks you to point *your* column headers at
+item / unit / par. The mapping is saved under a name you choose, shown
+in the Mappings tab, and deletable; a re-import of the same sheet
+recognizes its headers and just works.
+
+Import honesty: blank rows and TOTAL rows are skipped **and counted**,
+rows that cannot parse are rejected with a reason shown to you — nothing
+disappears silently. Re-importing reconciles (no duplicate Roma
+Tomatoes) and never removes rows the file did not mention. Par `0`
+means *stocked but not normally reordered*; an empty par means *not set*
+— the sheet keeps the two distinct. `.xls` is not supported: save as
+`.xlsx` or `.csv`.
+
 ### Two passwords
 
 | Password | Grants |
