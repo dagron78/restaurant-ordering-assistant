@@ -96,8 +96,10 @@ class Config:
     # Price list keywords for email filtering
     PRICE_LIST_KEYWORDS: list = ['price', 'catalog', 'list', 'quote', 'invoice', 'pricing']
 
-    # Valid attachment extensions
-    VALID_EXTENSIONS: list = ['.pdf', '.jpg', '.jpeg', '.png', '.xlsx', '.xls', '.csv']
+    # Valid attachment extensions. No .xls: openpyxl cannot read the
+    # legacy binary format, and the app does not advertise a type it
+    # refuses — a legacy sheet gets a save-as-xlsx/csv message (issue #53).
+    VALID_EXTENSIONS: list = ['.pdf', '.jpg', '.jpeg', '.png', '.xlsx', '.csv']
 
     @classmethod
     def ensure_directories(cls) -> None:

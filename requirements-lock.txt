@@ -39,6 +39,8 @@ cryptography==50.0.0
     # via google-auth
 distro==1.9.0
     # via google-genai
+et-xmlfile==2.0.0
+    # via openpyxl
 google-auth==2.56.3
     # via google-genai
 google-genai==1.75.0
@@ -83,6 +85,8 @@ numpy==2.4.6
     #   pandas
     #   pydeck
     #   streamlit
+openpyxl==3.1.5
+    # via -r requirements.txt
 packaging==26.3
     # via
     #   altair

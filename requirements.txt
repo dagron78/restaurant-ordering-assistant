@@ -16,6 +16,11 @@ imap-tools>=1.1,<2
 # Data Processing
 pandas>=2.0,<3
 
+# Order-sheet import (Phase B, issue #53): deterministic .xlsx parsing.
+# No .xls support — openpyxl cannot read the legacy binary format, and
+# the app does not advertise a type it refuses.
+openpyxl>=3.1,<4
+
 # Environment & Configuration
 python-dotenv>=1.0,<2
 
