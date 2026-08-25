@@ -246,6 +246,21 @@ if "round_confirm_flash" in st.session_state:
                    "(deliberate overrides included).")
     else:
         st.info(msg)
+    # Phase D (#57): the order is built — now let them place it. Persisted
+    # rather than flashed, because a flash vanishes on the next rerun and the
+    # manager still has three phone calls to make.
+    st.session_state["last_order_id"] = flash["order_id"]
+
+if st.session_state.get("last_order_id"):
+    from app.components.order_outputs import render_order_outputs
+
+    _oid = st.session_state["last_order_id"]
+    st.subheader(f"Place order #{_oid}")
+    render_order_outputs(db, _oid)
+    if st.button("Done — clear this", key="clear_last_order"):
+        del st.session_state["last_order_id"]
+        st.rerun()
+    st.divider()
 
 sheet = db.get_order_sheet()
 is_admin = st.session_state.get("role") == "admin"

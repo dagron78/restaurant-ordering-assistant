@@ -155,3 +155,110 @@ def build_vendor_email_draft(order: dict, vendor: str,
     out = _io.BytesIO()
     out.write(bytes(msg))
     return out.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Phase D (issue #57): outputs built from the STORED order.
+#
+# Phase C freezes vendor, unit price and the alt baseline at Send and stores
+# them at Confirm. Everything below reads that stored row and never re-queries
+# the market — an export showing live prices would hand the manager different
+# figures from the ones they approved.
+# ---------------------------------------------------------------------------
+
+def _stored_lines(order: dict, vendor: str = None):
+    """Lines from a stored order row, zero-quantity dropped.
+
+    A line with no quantity is not part of the order; listing it wastes the
+    rep's time on a call. Grouping is by the vendor STORED on the line, which
+    is the manager's choice when they overrode the engine.
+    """
+    out = []
+    for it in order.get("items") or []:
+        qty = float(it.get("quantity") or 0)
+        if qty <= 0:
+            continue
+        if vendor is not None and it.get("vendor_name") != vendor:
+            continue
+        unit_price = float(it.get("unit_price") or 0)
+        total = it.get("total_price")
+        out.append({
+            "name": it.get("item_name") or it.get("name") or "?",
+            "vendor": it.get("vendor_name"),
+            "quantity": qty,
+            "unit": it.get("unit") or "Each",
+            "unit_price": unit_price,
+            "total_price": float(total if total is not None else qty * unit_price),
+            "chosen_by": it.get("chosen_by") or "engine",
+        })
+    return out
+
+
+def _qty(value: float) -> str:
+    """Whole numbers read better aloud: 'four cases', not 'four point zero'."""
+    return str(int(value)) if float(value).is_integer() else f"{value:g}"
+
+
+def order_to_basket(order: dict) -> dict:
+    """Adapt a stored order row to the basket shape the PDF builder takes."""
+    lines = _stored_lines(order)
+    groups = {}
+    for line in lines:
+        groups.setdefault(line["vendor"], []).append(line)
+    # build_order_pdf's line contract is item/qty/total with a group subtotal;
+    # adapt to it rather than changing a builder Phase 5 already proved out.
+    out_groups = []
+    for vendor_name, group_lines in groups.items():
+        out_groups.append({
+            "vendor": vendor_name,
+            "subtotal": sum(l["total_price"] for l in group_lines),
+            "lines": [{
+                "item": l["name"],
+                "qty": l["quantity"],
+                "unit": l["unit"],
+                "unit_price": l["unit_price"],
+                "total": l["total_price"],
+            } for l in group_lines],
+        })
+    return {
+        "groups": out_groups,
+        "total": sum(l["total_price"] for l in lines),
+        "date": (order.get("order_date") or "")[:10] or None,
+        "order_id": order.get("id") or order.get("order_id"),
+    }
+
+
+def build_call_sheet(order: dict, vendor: str) -> str:
+    """A per-vendor sheet to READ ALOUD to a rep on the phone.
+
+    Different job from the PDF: numbered so the manager can say "line 3" and
+    the rep can follow, item first because that is what the rep looks up, and
+    the expected price on every line so a discrepancy surfaces on the call.
+    """
+    lines = _stored_lines(order, vendor)
+    oid = order.get("id") or order.get("order_id")
+    date = (order.get("order_date") or "")[:10]
+    head = [
+        "CALL SHEET \u2014 " + str(vendor),
+        "Order #" + str(oid) + ((" \u00b7 " + date) if date else ""),
+        str(len(lines)) + (" items" if len(lines) != 1 else " item"),
+        "",
+    ]
+    body = []
+    for i, l in enumerate(lines, 1):
+        body.append(
+            str(i) + ". " + l["name"] + " \u2014 " + _qty(l["quantity"]) + " "
+            + l["unit"] + " \u2014 $" + _money(l["unit_price"]) + " each")
+    subtotal = sum(l["total_price"] for l in lines)
+    return "\n".join(head + body + ["", "Subtotal: $" + _money(subtotal)])
+
+
+def build_copy_text(order: dict, vendor: str) -> str:
+    """Plain text for the manager to paste into their own mail or messages."""
+    lines = _stored_lines(order, vendor)
+    oid = order.get("id") or order.get("order_id")
+    body = [_qty(l["quantity"]) + " " + l["unit"] + " " + l["name"]
+            + " @ $" + _money(l["unit_price"]) for l in lines]
+    subtotal = sum(l["total_price"] for l in lines)
+    return "\n".join(["Order #" + str(oid) + " \u2014 " + str(vendor), ""]
+                     + body + ["", "Total: $" + _money(subtotal)])
