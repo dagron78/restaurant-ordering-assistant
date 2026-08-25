@@ -114,7 +114,7 @@ jobs:
         run: pip install -r requirements-lock.txt
 
       - name: Run slow UI tests explicitly
-        run: pytest tests/test_ui_apptest.py -m slow_ui -rs -v -p no:cacheprovider
+        run: pytest -m slow_ui -rs -v -p no:cacheprovider
 
   docker:
     name: Docker build

@@ -5,7 +5,7 @@ the app and watch each guard do its job.
 
 ```bash
 python scripts/seed_mock_restaurant.py --reset
-streamlit run app.py
+streamlit run app/Home.py
 ```
 
 No `GOOGLE_API_KEY`. No network. About two seconds.
