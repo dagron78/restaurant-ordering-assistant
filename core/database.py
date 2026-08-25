@@ -27,7 +27,7 @@ LATEST_PRICE_RANK_ORDER = "ph.date_recorded DESC, ph.created_at DESC, ph.id DESC
 # Highest schema version implemented by scripts/migrations/. Bump it together
 # with a new NNN_*.sql file there; PRAGMA user_version on real databases
 # records how far each one has come.
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 MIGRATIONS_DIR = Config.BASE_DIR / "scripts" / "migrations"
 
 
@@ -371,6 +371,65 @@ class Database:
             conn.execute("DELETE FROM sheet_mappings WHERE name = ?",
                          (name,))
     
+    # ==========================================
+    # PLAN DRAFTS (Phase C · issue #55)
+    # The ordering round's server-side draft: sheet quantities and the
+    # SENT plan snapshot survive phone screen locks and device switches.
+    # ONE open draft at a time (single kitchen, one manager); a
+    # confirmed draft is never silently resurrected as open.
+    # ==========================================
+
+    def get_open_draft(self) -> Optional[Dict]:
+        """The single open draft (status != 'confirmed'), or None."""
+        with self.get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM plan_drafts WHERE status != 'confirmed' "
+                "ORDER BY updated_at DESC LIMIT 1").fetchone()
+        if not row:
+            return None
+        import json
+
+        return {"id": row["id"], "status": row["status"],
+                "payload": json.loads(row["payload"]),
+                "updated_at": row["updated_at"]}
+
+    def save_draft(self, payload: Dict, status: str) -> int:
+        """Upsert THE open draft. Overwrites any prior open draft —
+        a second Send replaces the first, deliberately."""
+        if status not in ('entering', 'plan_ready'):
+            raise ValueError(
+                "save_draft is for open drafts; confirmed is terminal")
+        import json
+
+        with self.get_connection() as conn:
+            conn.execute("DELETE FROM plan_drafts WHERE status != 'confirmed'")
+            cursor = conn.execute(
+                "INSERT INTO plan_drafts (status, payload) VALUES (?, ?)",
+                (status, json.dumps(payload)))
+            return cursor.lastrowid
+
+    def confirm_draft(self, draft_id: int) -> None:
+        """Mark a draft confirmed — terminal. It is kept for the record
+        and never reopened."""
+        with self.get_connection() as conn:
+            conn.execute(
+                "UPDATE plan_drafts SET status = 'confirmed', "
+                "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (draft_id,))
+
+    def get_draft(self, draft_id: int) -> Optional[Dict]:
+        import json
+
+        with self.get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM plan_drafts WHERE id = ?",
+                (draft_id,)).fetchone()
+        if not row:
+            return None
+        return {"id": row["id"], "status": row["status"],
+                "payload": json.loads(row["payload"]),
+                "updated_at": row["updated_at"]}
+
     def get_vendor(self, vendor_id: int = None, name: str = None) -> Optional[Dict]:
         """Get vendor by ID or name."""
         with self.get_connection() as conn:
@@ -995,16 +1054,25 @@ class Database:
     def create_order(self, items: List[Dict], notes: str = None,
                      status: str = 'draft') -> Dict:
         """
-        Create a new order with items and honest savings tracking.
+        Create a new order with honest savings tracking.
 
-        Each line's baseline is resolved INTERNALLY at save time: the
-        cheapest latest quote among all OTHER vendors for that item, frozen
-        thereafter. Lines where no other vendor quotes are excluded from
-        savings and counted - never folded in at zero. Negative savings (a
-        dearer vendor chosen anyway) are preserved unclamped.
+        Each line's baseline is the cheapest latest quote among all OTHER
+        vendors for that item, frozen thereafter. Lines where no other
+        vendor quotes are excluded from savings and counted - never
+        folded in at zero. Negative savings (a dearer vendor chosen
+        anyway) are preserved unclamped.
+
+        Baseline resolution (Phase C, issue #55): a line MAY supply
+        alt_vendor_id/alt_price — the plan snapshot taken at Send. A
+        supplied baseline is stored AS-IS so the recorded savings match
+        what the manager confirmed on screen; only lines WITHOUT one are
+        resolved here (Phase 2 behaviour, unchanged for existing
+        callers). chosen_by ('engine'|'manager') records who picked the
+        vendor; an override is a human decision, not a recommendation.
 
         Args:
-            items: Lines shaped {item_id, vendor_id, quantity, unit_price[, unit]}
+            items: Lines shaped {item_id, vendor_id, quantity, unit_price[,
+                unit][, alt_vendor_id, alt_price, chosen_by]}
                 (avg_price/max_price still accepted and stored as context)
             notes: Order notes
             status: Initial status ('draft', 'submitted', 'completed',
@@ -1020,48 +1088,63 @@ class Database:
             sv_alt = 0
             excluded = 0
             prepared = []
-            
+
             for item in items:
                 qty = item.get('quantity', 0)
                 unit_price = item.get('unit_price', 0)
                 avg_price = item.get('avg_price')
                 max_price = item.get('max_price')
-                
+
                 total += qty * unit_price
-                
+
                 # Legacy context columns (labelled pre-v1 semantics upstream)
                 if avg_price and avg_price > unit_price:
                     sv_avg += qty * (avg_price - unit_price)
                 if max_price and max_price > unit_price:
                     sv_max += qty * (max_price - unit_price)
-                
-                # The headline baseline: cheapest alternative, frozen now.
-                alt = None
-                if item.get('item_id') and item.get('vendor_id'):
-                    alt = self._get_cheapest_alternative(
-                        conn, item['item_id'], item['vendor_id'])
-                
-                if alt is None:
-                    excluded += 1
-                    line_basis = 'no_alternative'
-                    line_vs_alt = 0
-                    alt_vendor_id = None
-                    alt_price = None
+
+                # The headline baseline: cheapest alternative, frozen now
+                # — unless the plan snapshot supplies it, in which case it
+                # is already frozen and re-resolving here would record a
+                # market the manager never saw.
+                alt_vendor_id = item.get('alt_vendor_id')
+                alt_price = item.get('alt_price')
+                if alt_vendor_id is None or alt_price is None:
+                    alt = None
+                    if item.get('item_id') and item.get('vendor_id'):
+                        alt = self._get_cheapest_alternative(
+                            conn, item['item_id'], item['vendor_id'])
+                    if alt is None:
+                        excluded += 1
+                        line_basis = 'no_alternative'
+                        line_vs_alt = 0
+                        alt_vendor_id = None
+                        alt_price = None
+                    else:
+                        line_basis = 'vs_alt'
+                        line_vs_alt = qty * (alt['price'] - unit_price)
+                        sv_alt += line_vs_alt
+                        alt_vendor_id = alt['vendor_id']
+                        alt_price = alt['price']
                 else:
                     line_basis = 'vs_alt'
-                    line_vs_alt = qty * (alt['price'] - unit_price)
+                    line_vs_alt = qty * (alt_price - unit_price)
                     sv_alt += line_vs_alt
-                    alt_vendor_id = alt['vendor_id']
-                    alt_price = alt['price']
-                
+
+                chosen_by = item.get('chosen_by', 'engine')
+                if chosen_by not in ('engine', 'manager'):
+                    raise ValueError(
+                        f"chosen_by must be 'engine' or 'manager', "
+                        f"got {chosen_by!r}")
+
                 prepared.append((item, alt_vendor_id, alt_price,
-                                 line_vs_alt, line_basis))
-            
+                                 line_vs_alt, line_basis, chosen_by))
+
             # Any real baseline makes the aggregate a vs-alt number; an order
             # whose every line lacked one is honestly labelled otherwise.
             order_basis = ('unknown_legacy' if prepared
                            and all(p[4] != 'vs_alt' for p in prepared) else 'vs_alt')
-            
+
             cursor = conn.execute(
                 """INSERT INTO orders
                    (status, total_amount, total_savings, savings_vs_avg,
@@ -1072,8 +1155,9 @@ class Database:
                  sv_alt, excluded, order_basis, notes)
             )
             order_id = cursor.lastrowid
-            
-            for item, alt_vendor_id, alt_price, line_vs_alt, line_basis in prepared:
+
+            for (item, alt_vendor_id, alt_price, line_vs_alt, line_basis,
+                 chosen_by) in prepared:
                 qty = item.get('quantity', 0)
                 unit_price = item.get('unit_price', 0)
                 avg_price = item.get('avg_price')
@@ -1089,13 +1173,14 @@ class Database:
                     (order_id, item_id, vendor_id, quantity, unit, unit_price,
                      total_price, avg_price, max_price, savings_vs_avg,
                      savings_vs_max, savings_vs_alt, alt_vendor_id, alt_price,
-                     savings_basis)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     savings_basis, chosen_by)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     order_id, item['item_id'], item['vendor_id'], qty,
                     item.get('unit', 'Each'), unit_price, total_price,
                     avg_price, max_price, line_sv_avg, line_sv_max,
                     line_vs_alt, alt_vendor_id, alt_price, line_basis,
+                    chosen_by,
                 ))
             
             return {

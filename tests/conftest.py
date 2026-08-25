@@ -30,6 +30,22 @@ def _restore_live_config_descriptors():
             setattr(Config, name, desc)
 
 
+@pytest.fixture(autouse=True)
+def _clear_streamlit_resource_cache():
+    """get_database() is @st.cache_resource — process-global. Without
+    this, an AppTest in test N can receive the Database instance built
+    for test 1 (pointing at test 1's temp file). Phase B's UI tests
+    passed only because their fixtures were identical; Phase C's are
+    not. Clear between tests so every AppTest sees its own database."""
+    yield
+    try:
+        import streamlit as st
+
+        st.cache_resource.clear()
+    except Exception:
+        pass
+
+
 @pytest.fixture()
 def db(tmp_path):
     """Database initialized with the real schema in a temp directory."""

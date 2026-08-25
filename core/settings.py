@@ -52,6 +52,10 @@ SETTING_DEFS: Dict[str, tuple] = {
     "TREND_DAYS":     (30, int, False, "Rolling average window (days)"),
     "SPIKE_THRESHOLD": (0.10, float, False, "Spike threshold (fraction)"),
     "DEAL_THRESHOLD":  (-0.10, float, False, "Deal threshold (fraction)"),
+    # Ordering round (Phase C): plan-after = sheet -> Send -> plan ->
+    # override -> confirm (default, matches working from par);
+    # plan_during = prices inline while entering (the Order Guide).
+    "ORDER_MODE": ("plan_after", str, False, "Ordering mode"),
 }
 
 # Credential hashes live in the same table but are not operator-editable

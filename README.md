@@ -86,6 +86,26 @@ next page run — no restart, no file editing.
 The `.env` file is bootstrap only: `DATABASE_PATH` and the one-time
 `INITIAL_ADMIN_PASSWORD` (see `.env.example`).
 
+## The Ordering Round
+
+**Order Sheet → Send → suggested plan → override → Confirm** — request
+first, then how to buy it. The sheet opens prefilled from par; set what
+you need (0 for anything you don't), hit Send, and the plan comes back:
+per line, the vendor, the price, the alternative it beat and why (rule
+names included). Every line is overridable — vendor or quantity — and a
+deliberately dearer pick is recorded as *your call* with an honest
+negative saving. Confirm **builds and stores the order; it does not
+send anything** — place each order yourself.
+
+The draft lives on the server: a phone screen lock loses nothing, and
+you can start on the phone and finish on the restaurant computer.
+Prices are snapshotted at Send, so what you confirm is exactly what is
+recorded, even if a vendor changes prices meanwhile.
+
+Kitchens that prefer **plan-during** — prices inline while entering —
+can switch modes in Settings → Configuration; plan-after is the
+default.
+
 ## The Order Sheet
 
 The kitchen's standing list lives on its own page — **Order Sheet** in

@@ -68,3 +68,6 @@ test-results/
 *.db-wal
 *.db-shm
 workers/email_monitor_legacy.py.txt
+
+# Runtime uploads (order-sheet import temp files)
+data/upload_sheet_*

@@ -24,7 +24,8 @@ import streamlit as st
 
 from app.components.auth_gate import gate_or_stop
 from app.components.resources import get_database
-from core import order_sheet
+from core import order_sheet, plan as plan_builder
+from core.config import Config
 from core.order_sheet import (
     SheetMapping,
     UnsupportedDocumentError,
@@ -33,6 +34,185 @@ from core.order_sheet import (
     parse_grid,
     read_grid,
 )
+from core.settings import get_setting
+
+
+def _render_entry(db, sheet):
+    """Stage 1: the sheet on a phone — par-prefilled quantities, running
+    total, Send. Every change writes through to the server-side draft,
+    so a phone screen lock loses nothing."""
+    if not sheet:
+        st.info("The sheet is empty — import the kitchen's spreadsheet "
+                "below first.")
+        return
+
+    draft = db.get_open_draft()
+    saved = (draft or {}).get("payload", {}).get("quantities", {}) \
+        if draft and draft["status"] == "entering" else {}
+    if draft and draft["status"] == "plan_ready":
+        # A sent plan exists; entry edits would discard it — say so.
+        st.warning("A plan has already been sent and is waiting for "
+                   "review below. Editing here and sending again "
+                   "replaces it.", icon="✏️")
+
+    st.subheader("1 · What do we need?")
+    st.caption("Prefilled from par. Set to 0 anything you don't need "
+               "this week.")
+
+    quantities = {}
+    with st.form("round_entry_form", border=False):
+        for entry in sheet:
+            label = entry["name"] + (
+                f" ({entry['default_unit']})"
+                if entry["default_unit"] else "")
+            par = entry["par_level"]
+            par_note = ""
+            if par == 0:
+                par_note = " · par 0: stocked, not normally reordered"
+            default = float(saved.get(entry["name"],
+                                      par if par else 0.0))
+            quantities[entry["name"]] = st.number_input(
+                f"{label}{par_note}",
+                min_value=0.0, step=1.0,
+                value=default,
+                key=f"rq_{entry['item_id']}")
+        sent = st.form_submit_button("📤 Send — build the plan",
+                                     type="primary",
+                                     use_container_width=True)
+
+    if sent:
+        plan = plan_builder.build_plan(db, quantities)
+        db.save_draft(
+            {"quantities": quantities, "lines": plan["lines"],
+             "unpriced": plan["unpriced"],
+             "built_at": plan["built_at"]},
+            status="plan_ready")
+        if plan["unpriced"]:
+            st.session_state["round_unpriced_flash"] = plan["unpriced"]
+        st.rerun()
+
+    # Running total preview from CURRENT widget values (pre-Send).
+    live = {name: st.session_state.get(f"rq_{e['item_id']}", 0)
+            for e in sheet
+            for name in [e["name"]]}
+    preview = plan_builder.build_plan(db, live)
+    if preview["lines"]:
+        totals = plan_builder.plan_net_vs_alt(preview["lines"])
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Lines", len(preview["lines"]))
+        c2.metric("Order total",
+                  f"${plan_builder.plan_total(preview['lines']):,.2f}")
+        c3.metric("Net vs alternatives", f"${totals['net']:+,.2f}",
+                  help=f"{totals['compared']} line(s) compared"
+                       + (f"; {totals['excluded']} without an "
+                          "alternative quote excluded" if totals["excluded"]
+                          else ""))
+    if st.session_state.get("round_unpriced_flash"):
+        st.warning("No prices yet for: " + ", ".join(
+            st.session_state.pop("round_unpriced_flash"))
+            + " — they cannot be ordered until a vendor quotes them.")
+
+
+def _render_review(db, draft):
+    """Stage 2: the suggested plan, every line overridable, confirm
+    builds the order from the frozen snapshot."""
+    from app.components import vendor_override
+
+    payload = draft["payload"]
+    lines = payload.get("lines", [])
+    st.subheader("2 · Suggested plan")
+    st.caption("Built "
+               + payload.get("built_at", "")
+               + ". Every line can be overridden — the record keeps "
+                 "your choice and computes savings against it.")
+
+    overrides_changed = False
+    for idx, line in enumerate(lines):
+        with st.container(border=True):
+            c1, c2 = st.columns([3, 2])
+            with c1:
+                st.markdown(f"**{line['name']}** — {line['quantity']:g} "
+                            f"{line.get('unit') or ''}")
+                if line.get("reasons"):
+                    st.caption("Why: " + " → ".join(line["reasons"][:2]))
+                alt = line.get("alt_vendor")
+                if alt:
+                    delta = line["quantity"] * (
+                        (line.get("alt_price") or 0) - line["unit_price"])
+                    sign = "saves" if delta >= 0 else "pays"
+                    st.caption(f"vs {alt}: {sign} "
+                               f"${abs(delta):,.2f}")
+                else:
+                    st.caption("No alternative quote — excluded from "
+                               "savings")
+            with c2:
+                new_qty = st.number_input(
+                    "Qty", min_value=0.0, step=1.0,
+                    value=float(line["quantity"]),
+                    key=f"rv_qty_{idx}")
+                if new_qty != line["quantity"]:
+                    line["quantity"] = float(new_qty)
+                    overrides_changed = True
+                if line.get("alt_vendor_id") or True:
+                    before = (line["vendor_id"], line["unit_price"],
+                              line.get("chosen_by"))
+                    line = vendor_override.render(
+                        db, line, key=f"ovr_{idx}")
+                    if (line["vendor_id"], line["unit_price"],
+                            line.get("chosen_by")) != before:
+                        overrides_changed = True
+
+    if overrides_changed:
+        payload["lines"] = lines
+        db.save_draft(payload, status="plan_ready")
+        st.rerun()
+
+    totals = plan_builder.plan_net_vs_alt(lines)
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Lines", len(lines))
+    c2.metric("Order total", f"${plan_builder.plan_total(lines):,.2f}")
+    c3.metric("Net vs alternatives", f"${totals['net']:+,.2f}",
+              help=f"{totals['compared']} compared"
+                   + (f"; {totals['excluded']} excluded"
+                      if totals["excluded"] else ""))
+    overridden = sum(1 for line in lines
+                     if line.get("chosen_by") == "manager")
+    if overridden:
+        st.caption(f"✍️ {overridden} line(s) overridden by you — stored "
+                   "as your call, savings computed against your pick.")
+
+    if st.button("✅ Confirm — build the order (nothing is sent)",
+                 type="primary", use_container_width=True):
+        order_lines = [{
+            "item_id": line["item_id"], "vendor_id": line["vendor_id"],
+            "quantity": line["quantity"], "unit": line.get("unit"),
+            "unit_price": line["unit_price"],
+            "alt_vendor_id": line.get("alt_vendor_id"),
+            "alt_price": line.get("alt_price"),
+            "chosen_by": line.get("chosen_by", "engine"),
+        } for line in lines]
+        result = db.create_order(order_lines, status="completed",
+                                 notes="Ordering round "
+                                       f"(plan built {payload.get('built_at', '')})")
+        stored = db.get_order(result["order_id"])
+        db.confirm_draft(draft["id"])
+        st.session_state["round_confirm_flash"] = {
+            "order_id": result["order_id"],
+            "lines": len(stored["items"]),
+            "total": stored["total_amount"],
+            "savings": stored["savings_vs_alt"],
+        }
+        st.rerun()
+    st.caption("Confirm builds and stores the order. It does NOT send "
+               "anything — place each order yourself (phone a rep, "
+               "email, whatever works).")
+    if st.button("↩️ Discard this plan, back to the sheet"):
+        import json as _json  # noqa: F401
+
+        db.save_draft({"quantities": payload.get("quantities", {})},
+                      status="entering")
+        st.rerun()
+
 
 gate_or_stop()
 
@@ -51,10 +231,48 @@ if "sheet_import_flash" in st.session_state:
     if flash["created"]:
         st.write("New: " + ", ".join(flash["created"]))
 
+# Outcome flash from a confirmed order (stored numbers, never on-screen
+# estimates — same rule as the import flash and the Order Guide save).
+if "round_confirm_flash" in st.session_state:
+    flash = st.session_state.pop("round_confirm_flash")
+    net = flash["savings"]
+    msg = (f"✅ Order #{flash['order_id']} built — "
+           f"{flash['lines']} lines, ${flash['total']:,.2f}. "
+           "Nothing was sent: place each order yourself.")
+    if net > 0:
+        st.success(msg + f" Net saving ${net:,.2f} vs alternatives.")
+    elif net < 0:
+        st.warning(msg + f" Net ${abs(net):,.2f} MORE than alternatives "
+                   "(deliberate overrides included).")
+    else:
+        st.info(msg)
+
 sheet = db.get_order_sheet()
 is_admin = st.session_state.get("role") == "admin"
 
 st.title("📝 Order Sheet")
+
+# ---- the ordering round (plan-after; app-level — this is the round) ----
+
+MODE = get_setting("ORDER_MODE", db=db)
+
+if MODE == "plan_during":
+    st.info("📋 This kitchen orders in **plan-during** mode: prices and "
+            "best vendor show inline as you enter quantities — use the "
+            "Order Guide. The sheet below is your standing list.",
+            icon="🧭")
+else:
+    draft = db.get_open_draft()
+    stage = draft["status"] if draft else "entering"
+
+    if stage == "confirmed" or (draft and draft["status"] == "confirmed"):
+        draft, stage = None, "entering"
+
+    if stage == "entering":
+        _render_entry(db, sheet)
+    elif stage == "plan_ready":
+        _render_review(db, draft)
+    st.divider()
 st.caption("The kitchen's standing list, prefilled from par. Phase C "
            "brings quantity entry and the ordering round.")
 
@@ -270,8 +488,11 @@ with tab_import:
 
     grid = st.session_state.get("sheet_grid")
     if uploaded is not None:
-        tmp = Path("data") / f"upload_sheet_{uploaded.name}"
-        tmp.parent.mkdir(parents=True, exist_ok=True)
+        # Temp files go to the configured TEMP_PATH (gitignored), never
+        # data/ itself — a leaked upload once committed a real kitchen
+        # spreadsheet (fixed in Phase C).
+        Config.TEMP_PATH.mkdir(parents=True, exist_ok=True)
+        tmp = Config.TEMP_PATH / f"upload_sheet_{uploaded.name}"
         tmp.write_bytes(uploaded.getvalue())
         try:
             st.session_state["sheet_grid"] = grid = read_grid(tmp)
