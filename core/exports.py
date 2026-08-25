@@ -211,18 +211,18 @@ def order_to_basket(order: dict) -> dict:
     for vendor_name, group_lines in groups.items():
         out_groups.append({
             "vendor": vendor_name,
-            "subtotal": sum(l["total_price"] for l in group_lines),
+            "subtotal": sum(ln["total_price"] for ln in group_lines),
             "lines": [{
-                "item": l["name"],
-                "qty": l["quantity"],
-                "unit": l["unit"],
-                "unit_price": l["unit_price"],
-                "total": l["total_price"],
-            } for l in group_lines],
+                "item": ln["name"],
+                "qty": ln["quantity"],
+                "unit": ln["unit"],
+                "unit_price": ln["unit_price"],
+                "total": ln["total_price"],
+            } for ln in group_lines],
         })
     return {
         "groups": out_groups,
-        "total": sum(l["total_price"] for l in lines),
+        "total": sum(ln["total_price"] for ln in lines),
         "date": (order.get("order_date") or "")[:10] or None,
         "order_id": order.get("id") or order.get("order_id"),
     }
@@ -245,11 +245,11 @@ def build_call_sheet(order: dict, vendor: str) -> str:
         "",
     ]
     body = []
-    for i, l in enumerate(lines, 1):
+    for i, ln in enumerate(lines, 1):
         body.append(
-            str(i) + ". " + l["name"] + " \u2014 " + _qty(l["quantity"]) + " "
-            + l["unit"] + " \u2014 $" + _money(l["unit_price"]) + " each")
-    subtotal = sum(l["total_price"] for l in lines)
+            str(i) + ". " + ln["name"] + " \u2014 " + _qty(ln["quantity"]) + " "
+            + ln["unit"] + " \u2014 $" + _money(ln["unit_price"]) + " each")
+    subtotal = sum(ln["total_price"] for ln in lines)
     return "\n".join(head + body + ["", "Subtotal: $" + _money(subtotal)])
 
 
@@ -257,8 +257,8 @@ def build_copy_text(order: dict, vendor: str) -> str:
     """Plain text for the manager to paste into their own mail or messages."""
     lines = _stored_lines(order, vendor)
     oid = order.get("id") or order.get("order_id")
-    body = [_qty(l["quantity"]) + " " + l["unit"] + " " + l["name"]
-            + " @ $" + _money(l["unit_price"]) for l in lines]
-    subtotal = sum(l["total_price"] for l in lines)
+    body = [_qty(ln["quantity"]) + " " + ln["unit"] + " " + ln["name"]
+            + " @ $" + _money(ln["unit_price"]) for ln in lines]
+    subtotal = sum(ln["total_price"] for ln in lines)
     return "\n".join(["Order #" + str(oid) + " \u2014 " + str(vendor), ""]
                      + body + ["", "Total: $" + _money(subtotal)])
