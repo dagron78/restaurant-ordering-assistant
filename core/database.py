@@ -1345,6 +1345,25 @@ class Database:
                 'savings_percentage': 0
             }
     
+    def list_orders(self, limit: int = 50,
+                    status: str = 'completed') -> List[Dict]:
+        """Recent orders, newest first — the index behind Order History.
+
+        Phase D (#57): an order confirmed this morning has to be reachable
+        this afternoon. Returns the stored columns only; nothing is
+        re-queried against the market.
+        """
+        sql = ("SELECT id, order_date, status, total_amount, savings_vs_alt, "
+               "lines_without_alt, savings_basis FROM orders")
+        params: List = []
+        if status:
+            sql += " WHERE status = ?"
+            params.append(status)
+        sql += " ORDER BY datetime(order_date) DESC, id DESC LIMIT ?"
+        params.append(int(limit))
+        with self.get_connection() as conn:
+            return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
     def get_item_savings_breakdown(self, order_id: int = None) -> List[Dict]:
         """
         Get savings breakdown by item for an order or all orders.

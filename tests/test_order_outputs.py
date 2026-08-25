@@ -109,3 +109,41 @@ def test_call_sheet_only_lists_the_named_vendor(confirmed_order):
 def test_copy_text_is_per_vendor_and_plain(confirmed_order):
     text = exports.build_copy_text(confirmed_order, "Sysco")
     assert "Roma Tomatoes" in text and "Heavy Duty Foil Wrap" not in text
+
+
+def test_basket_satisfies_the_pdf_builder_contract(confirmed_order):
+    """The adapter has to speak the builder's language (item/qty/total/
+    subtotal), not its own. Missed first time round — unit tests passed while
+    the page raised KeyError('item')."""
+    basket = exports.order_to_basket(confirmed_order)
+    pdf = exports.build_order_pdf(basket)          # raises if the shape is wrong
+    assert pdf[:4] == b"%PDF"
+    for group in basket["groups"]:
+        assert "subtotal" in group
+        for line in group["lines"]:
+            assert {"item", "qty", "unit", "unit_price", "total"} <= set(line)
+
+
+def test_list_orders_returns_newest_first_and_only_completed(db):
+    item = db.add_item("Roma Tomatoes", "Produce", "Case")
+    vendor = db.get_or_create_vendor("Sysco")
+    db.add_price("Roma Tomatoes", "Sysco", 22.00, "Case")
+    line = {"item_id": item, "vendor_id": vendor, "quantity": 1,
+            "unit_price": 22.00, "unit": "Case"}
+    done = db.create_order([dict(line)], status="completed")["order_id"]
+    db.create_order([dict(line)], status="draft")
+    rows = db.list_orders()
+    assert [r["id"] for r in rows] == [done], "drafts must not appear in history"
+
+
+def test_no_page_uses_the_legacy_require_login():
+    """require_login() unconditionally renders the login screen — it does not
+    check anything, so a page using it is permanently gated. Cost an hour of
+    debugging on the history page; pin it so the next one is cheaper."""
+    import pathlib
+    app = pathlib.Path(__file__).parent.parent / "app"
+    offenders = [
+        str(f.relative_to(app)) for f in app.rglob("*.py")
+        if f.name != "auth_gate.py" and "require_login" in f.read_text()
+    ]
+    assert not offenders, f"use gate_or_stop() instead: {offenders}"

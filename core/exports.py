@@ -205,8 +205,23 @@ def order_to_basket(order: dict) -> dict:
     groups = {}
     for line in lines:
         groups.setdefault(line["vendor"], []).append(line)
+    # build_order_pdf's line contract is item/qty/total with a group subtotal;
+    # adapt to it rather than changing a builder Phase 5 already proved out.
+    out_groups = []
+    for vendor_name, group_lines in groups.items():
+        out_groups.append({
+            "vendor": vendor_name,
+            "subtotal": sum(l["total_price"] for l in group_lines),
+            "lines": [{
+                "item": l["name"],
+                "qty": l["quantity"],
+                "unit": l["unit"],
+                "unit_price": l["unit_price"],
+                "total": l["total_price"],
+            } for l in group_lines],
+        })
     return {
-        "groups": [{"vendor": v, "lines": ls} for v, ls in groups.items()],
+        "groups": out_groups,
         "total": sum(l["total_price"] for l in lines),
         "date": (order.get("order_date") or "")[:10] or None,
         "order_id": order.get("id") or order.get("order_id"),
