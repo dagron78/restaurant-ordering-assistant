@@ -192,43 +192,40 @@ def collapse_sidebar_on_mobile(breakpoint_px: int = 768) -> None:
     """Close the navigation drawer after a page is chosen, on narrow screens.
 
     The manager orders from a phone. Below Streamlit's breakpoint the sidebar
-    is an overlay (z-index ~999991, main content still full width) and it does
+    is an overlay (z-index ~999991; main content stays full width) and it does
     NOT close when you pick a page — so tapping "Order Sheet" lands you on the
     order sheet with the drawer sitting on top of it, hiding every item name.
     Verified at a 500px viewport: after navigating, the drawer was still open
-    and the page title was clipped.
+    and the page heading was clipped.
 
-    Streamlit exposes no API for this, so we attach one listener to the parent
-    document from a zero-height component. Everything is defensive: if the
-    testids move in a future Streamlit, the selector misses and this becomes a
-    no-op — the app is exactly as it is today, never worse.
+    Streamlit exposes no API for this, so we attach one document-level
+    listener. Everything is defensive: if these testids move in a future
+    Streamlit the selector simply misses and this becomes a no-op — the app
+    behaves exactly as it does today, never worse.
     """
-    import streamlit.components.v1 as components
-
-    components.html(
+    st.html(
         """
         <script>
         (function () {
           try {
-            var doc = window.parent && window.parent.document;
-            if (!doc || doc.__kogCollapseNavBound) { return; }
-            doc.__kogCollapseNavBound = true;
-            doc.addEventListener('click', function (ev) {
+            if (document.__kogCollapseNavBound) { return; }
+            document.__kogCollapseNavBound = true;
+            document.addEventListener('click', function (ev) {
               try {
-                if (window.parent.innerWidth > %d) { return; }
+                if (window.innerWidth > %d) { return; }
                 var t = ev.target;
                 if (!t || !t.closest) { return; }
                 if (!t.closest('[data-testid="stSidebarNavLink"]')) { return; }
                 setTimeout(function () {
-                  var btn = doc.querySelector(
+                  var btn = document.querySelector(
                     '[data-testid="stSidebarCollapseButton"] button');
                   if (btn) { btn.click(); }
                 }, 200);
               } catch (e) { /* never break navigation */ }
             }, true);
-          } catch (e) { /* cross-origin or API moved: no-op */ }
+          } catch (e) { /* API moved: no-op */ }
         })();
         </script>
         """ % breakpoint_px,
-        height=0,
+        unsafe_allow_javascript=True,
     )
