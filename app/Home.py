@@ -18,6 +18,7 @@ import streamlit as st
 from core import auth
 from app.components.resources import get_database
 from app.components.auth_gate import is_authenticated, render_login
+from app.components.ui_helpers import collapse_sidebar_on_mobile
 
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s %(name)s %(levelname)s %(message)s')
@@ -34,6 +35,36 @@ db = get_database()
 # One-time adoption of the installer's INITIAL_ADMIN_PASSWORD, if any.
 # No-op once an admin password exists in the settings store.
 auth.bootstrap_initial_admin(db=db)
+
+
+
+def _latest_price_label(db) -> str:
+    """Plain-language freshness for the landing page.
+
+    A manager's question is "are these this week's prices?", so answer that
+    in their words: Today / Yesterday / a weekday / a date. Never a count.
+    """
+    from datetime import date, datetime
+
+    try:
+        raw = db.get_latest_price_date()
+    except Exception:
+        return "—"
+    if not raw:
+        return "No prices yet"
+    try:
+        seen = datetime.fromisoformat(str(raw)[:19]).date()
+    except ValueError:
+        return str(raw)[:10]
+
+    days = (date.today() - seen).days
+    if days <= 0:
+        return "Today"
+    if days == 1:
+        return "Yesterday"
+    if days < 7:
+        return seen.strftime("%A")
+    return seen.strftime("%d %b")
 
 
 def load_css():
@@ -91,8 +122,10 @@ def home_dashboard():
                 1 for item in items if db.get_latest_prices(item['name']))
             st.metric("Items with Prices", items_with_prices)
         with col4:
-            recent_updates = sum(1 for lg in logs if lg.get('status') == 'success')
-            st.metric("Successful Updates", recent_updates)
+            # "Successful Updates" counted pipeline runs — a number that
+            # means something to whoever built this and nothing to a
+            # kitchen manager. Show the date of the freshest price instead.
+            st.metric("Prices updated", _latest_price_label(db))
 
         # Intake status per vendor (#28 / #30 D)
         st.subheader("📡 Vendor Intake")
@@ -113,7 +146,7 @@ def home_dashboard():
         q_count = len(db.list_quarantine(limit=100))
         if q_count:
             st.warning(
-                f"📥 {q_count} message(s) from unrecognised senders are "
+                f"{q_count} message(s) from unrecognised senders are "
                 "waiting in Settings → Data → Quarantine.",
                 icon="📥")
         else:
@@ -135,6 +168,10 @@ load_css()
 if not is_authenticated():
     render_login()   # never returns while unauthenticated; belt below anyway
     st.stop()
+
+# The manager orders from a phone: close the nav drawer once a page is
+# picked, or it covers the page you just asked for.
+collapse_sidebar_on_mobile()
 
 pages = [
     st.Page(home_dashboard, title="Home", icon="🏠", default=True),

@@ -272,7 +272,7 @@ st.title("📝 Order Sheet")
 MODE = get_setting("ORDER_MODE", db=db)
 
 if MODE == "plan_during":
-    st.info("📋 This kitchen orders in **plan-during** mode: prices and "
+    st.info("This kitchen orders in **plan-during** mode: prices and "
             "best vendor show inline as you enter quantities — use the "
             "Order Guide. The sheet below is your standing list.",
             icon="🧭")
