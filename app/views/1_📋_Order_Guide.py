@@ -102,9 +102,7 @@ with col1:
     st.metric("Total Items", stats['total_items'])
 with col2:
     st.metric("With Prices", stats['items_with_prices'])
-    st.metric("With Prices", stats['items_with_prices'])
 with col3:
-    deals_spikes = stats['deals_count'] + stats['spikes_count']
     icon = "🟢" if stats['deals_count'] >= stats['spikes_count'] else "🔴"
     st.metric(f"{icon} Deals / Spikes", f"{stats['deals_count']} / {stats['spikes_count']}")
 with col4:
@@ -115,26 +113,30 @@ st.divider()
 
 # Group recommendations by category
 # Search/filter (#30 B)
-search = st.text_input("🔍 Search items", placeholder="Filter by name...",
-                        label_visibility="collapsed")
-
-categories = {}
-for rec in recommendations:
-    cat = rec.get('category') or 'Uncategorized'
-    if search and search.lower() not in rec.get('item','').lower():
-        continue
-    if cat not in categories:
-        categories[cat] = []
-    categories[cat].append(rec)
-
 # Ordering mode (Phase C): plan-after is the default flow and lives on
 # the Order Sheet page — sheet → Send → plan → override → confirm. The
 # Order Guide IS plan-during: prices and best vendor inline while
 # entering quantities.
 ORDER_MODE = get_setting("ORDER_MODE", db=db)
+
+# The search box only belongs above a list. In plan-after mode this page
+# shows no item list at all, so a filter here filtered nothing — it read
+# as a control that was simply broken.
+categories = {}
+if ORDER_MODE == "plan_during":
+    search = st.text_input("🔍 Search items", placeholder="Filter by name...",
+                           label_visibility="collapsed")
+    for rec in recommendations:
+        cat = rec.get('category') or 'Uncategorized'
+        if search and search.lower() not in rec.get('item', '').lower():
+            continue
+        if cat not in categories:
+            categories[cat] = []
+        categories[cat].append(rec)
+
 if ORDER_MODE == "plan_after":
     st.info(
-        "🧭 This kitchen orders **plan-after**: say what you need on the "
+        "This kitchen orders **plan-after**: say what you need on the "
         "Order Sheet, hit Send, and the suggested plan comes back for "
         "review — request first, then how to buy it.",
         icon="🧭")

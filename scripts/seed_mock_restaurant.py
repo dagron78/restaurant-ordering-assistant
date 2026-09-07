@@ -81,10 +81,10 @@ RULES = [
      "condition": {"prefer_vendor": "US Foods"},
      "action": "Always buy dairy from US Foods"},
     {"rule_type": "price_threshold", "item_pattern": "Avocados Hass 48ct",
-     "priority": 30, "condition": {"comparator": ">", "value": 50.0},
+     "priority": 30, "condition": {"comparator": ">", "threshold": 50.0},
      "action": "Alert above $50 per case"},
     {"rule_type": "exclusion", "item_pattern": "Leg Quarters 40lb", "priority": 40,
-     "condition": {"exclude_vendor": "Gordon Food Service"},
+     "condition": {"vendor": "Gordon Food Service"},
      "action": "Never buy Leg Quarters from Gordon Food Service"},
     # deliberately names an item that does not exist — must be ignored, not fatal
     {"rule_type": "vendor_preference", "item_pattern": "Saffron Threads",

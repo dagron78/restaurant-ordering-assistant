@@ -666,6 +666,20 @@ class Database:
         
         return added
     
+    def get_latest_price_date(self) -> Optional[str]:
+        """The freshest date_recorded across all price history, or None.
+
+        Answers "are these this week's prices?" for the landing page.
+        Ranks on date_recorded, not insertion order, for the same reason
+        get_latest_prices does (F-01): a backfilled sheet is inserted last
+        but is not the newest price.
+        """
+        with self.get_connection() as conn:
+            row = conn.execute(
+                "SELECT MAX(date_recorded) AS latest FROM price_history"
+            ).fetchone()
+        return row["latest"] if row and row["latest"] else None
+
     def get_latest_prices(self, item_name: str) -> List[Dict]:
         """
         Get most recent price from each vendor for an item.

@@ -154,13 +154,15 @@ def test_output_names_the_scenario_each_row_demonstrates(seeded):
         assert phrase.lower() in out.lower(), f"stdout never mentions {phrase}"
 
 
-def test_documented_commands_point_at_files_that_exist():
+@pytest.mark.parametrize("doc_name", ["MOCK_RESTAURANT.md", "TEST_DRIVE.md"])
+def test_documented_commands_point_at_files_that_exist(doc_name):
     """The doc told people to run `streamlit run app.py`. There is no
     app.py — the entrypoint is app/Home.py. A wrong first command is the
     whole demo for someone who never gets past it."""
     import re
-    doc = (REPO / "docs" / "MOCK_RESTAURANT.md").read_text()
+    doc = (REPO / "docs" / doc_name).read_text()
     targets = re.findall(r"(?:streamlit run|python)\s+(\S+\.py)", doc)
-    assert targets, "doc should show how to run it"
+    assert targets, f"{doc_name} should show how to run it"
     for target in targets:
-        assert (REPO / target).exists(), f"doc references missing {target}"
+        assert (REPO / target).exists(), \
+            f"{doc_name} references missing {target}"
