@@ -598,11 +598,15 @@ with tab5:
     # ---- Ordering round (Phase C) ---------------------------------------
     st.subheader("🧭 Ordering round")
     with st.form("cfg_order_mode", border=True):
+        max_quote_age = st.number_input(
+            "Maximum quote age (days)", min_value=1, max_value=365,
+            value=int(get_setting("MAX_QUOTE_AGE_DAYS", db=db)),
+            help="Older quotes are excluded from recommendations and vendor choices.")
         mode = st.radio(
             "Ordering mode",
             options=["plan_after", "plan_during"],
             format_func=lambda m: (
-                "Plan-after (default): walk the sheet → Send → suggested "
+                "Plan-after (default): walk the sheet → Review → suggested "
                 "plan → override → confirm"
                 if m == "plan_after" else
                 "Plan-during: prices and best vendor inline while entering "
@@ -611,7 +615,7 @@ with tab5:
             else 1,
             horizontal=True)
         if st.form_submit_button("Save ordering mode", type="primary"):
-            set_settings({"ORDER_MODE": mode}, db=db)
+            set_settings({"ORDER_MODE": mode, "MAX_QUOTE_AGE_DAYS": max_quote_age}, db=db)
             st.success("Ordering mode saved — effective immediately.")
 
     st.divider()

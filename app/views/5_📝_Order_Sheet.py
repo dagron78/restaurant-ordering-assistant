@@ -39,8 +39,7 @@ from core.settings import get_setting
 
 def _render_entry(db, sheet):
     """Stage 1: the sheet on a phone — par-prefilled quantities, running
-    total, Send. Every change writes through to the server-side draft,
-    so a phone screen lock loses nothing."""
+    total, and review. Committed edits write through to the server draft."""
     if not sheet:
         st.info("The sheet is empty — import the kitchen's spreadsheet "
                 "below first.")
@@ -49,49 +48,47 @@ def _render_entry(db, sheet):
     draft = db.get_open_draft()
     saved = (draft or {}).get("payload", {}).get("quantities", {}) \
         if draft and draft["status"] == "entering" else {}
-    if draft and draft["status"] == "plan_ready":
-        # A sent plan exists; entry edits would discard it — say so.
-        st.warning("A plan has already been sent and is waiting for "
-                   "review below. Editing here and sending again "
-                   "replaces it.", icon="✏️")
-
     st.subheader("1 · What do we need?")
     st.caption("Prefilled from par. Set to 0 anything you don't need "
                "this week.")
 
+    def save_quantities():
+        quantities = {
+            e["name"]: float(st.session_state.get(
+                f"rq_{e['item_id']}", saved.get(e["name"], e["par_level"] or 0)))
+            for e in sheet
+        }
+        db.save_entry_quantities(quantities)
+
     quantities = {}
-    with st.form("round_entry_form", border=False):
-        for entry in sheet:
-            label = entry["name"] + (
-                f" ({entry['default_unit']})"
-                if entry["default_unit"] else "")
-            par = entry["par_level"]
-            par_note = ""
-            if par == 0:
-                par_note = " · par 0: stocked, not normally reordered"
-            default = float(saved.get(entry["name"],
-                                      par if par else 0.0))
-            quantities[entry["name"]] = st.number_input(
-                f"{label}{par_note}",
-                min_value=0.0, step=1.0,
-                value=default,
-                key=f"rq_{entry['item_id']}")
-        sent = st.form_submit_button("📤 Send — build the plan",
-                                     type="primary",
-                                     use_container_width=True)
+    for entry in sheet:
+        label = entry["name"] + (
+            f" ({entry['default_unit']})" if entry["default_unit"] else "")
+        par = entry["par_level"]
+        par_note = " · par 0: stocked, not normally reordered" if par == 0 else ""
+        default = float(saved.get(entry["name"], par if par else 0.0))
+        quantities[entry["name"]] = st.number_input(
+            f"{label}{par_note}", min_value=0.0, step=1.0,
+            value=default, key=f"rq_{entry['item_id']}",
+            on_change=save_quantities)
+    st.caption("Changes save when you press Enter, leave a field, or use +/−.")
+    sent = st.button("Review suggested order", type="primary",
+                     use_container_width=True,
+                     disabled=not any(q > 0 for q in quantities.values()))
 
     if sent:
         plan = plan_builder.build_plan(db, quantities)
         db.save_draft(
             {"quantities": quantities, "lines": plan["lines"],
              "unpriced": plan["unpriced"],
-             "built_at": plan["built_at"]},
+             "built_at": plan["built_at"],
+             "warnings": plan.get("warnings", [])},
             status="plan_ready")
         if plan["unpriced"]:
             st.session_state["round_unpriced_flash"] = plan["unpriced"]
         st.rerun()
 
-    # Running total preview from CURRENT widget values (pre-Send).
+    # Running total updates on each committed quantity edit.
     live = {name: st.session_state.get(f"rq_{e['item_id']}", 0)
             for e in sheet
             for name in [e["name"]]}
@@ -107,10 +104,12 @@ def _render_entry(db, sheet):
                        + (f"; {totals['excluded']} without an "
                           "alternative quote excluded" if totals["excluded"]
                           else ""))
+    for note in preview.get("warnings", []):
+        st.warning(note)
     if st.session_state.get("round_unpriced_flash"):
-        st.warning("No prices yet for: " + ", ".join(
+        st.warning("No eligible quote for: " + ", ".join(
             st.session_state.pop("round_unpriced_flash"))
-            + " — they cannot be ordered until a vendor quotes them.")
+            + " — update prices or correct the unit/pack before ordering.")
 
 
 def _render_review(db, draft):
@@ -126,6 +125,13 @@ def _render_review(db, draft):
                + ". Every line can be overridden — the record keeps "
                  "your choice and computes savings against it.")
 
+    for note in payload.get("warnings", []):
+        st.warning(note)
+    if payload.get("unpriced"):
+        st.warning("Not included — no eligible quote: " + ", ".join(payload["unpriced"]))
+    omissions_ok = not payload.get("unpriced") or st.checkbox(
+        "I will handle the missing items separately", key="ack_missing_items")
+
     overrides_changed = False
     for idx, line in enumerate(lines):
         with st.container(border=True):
@@ -135,6 +141,11 @@ def _render_review(db, draft):
                             f"{line.get('unit') or ''}")
                 if line.get("reasons"):
                     st.caption("Why: " + " → ".join(line["reasons"][:2]))
+                quote = next((q for q in line.get("quotes", [])
+                              if q["vendor_id"] == line["vendor_id"]), {})
+                if quote.get("source_unit") and quote["source_unit"] != line.get("unit"):
+                    st.caption(f"Quoted ${quote['source_price']:.2f}/{quote['source_unit']}; "
+                               f"shown per {line['unit']}.")
                 alt = line.get("alt_vendor")
                 if alt:
                     delta = line["quantity"] * (
@@ -153,7 +164,7 @@ def _render_review(db, draft):
                 if new_qty != line["quantity"]:
                     line["quantity"] = float(new_qty)
                     overrides_changed = True
-                if line.get("alt_vendor_id") or True:
+                if line.get("vendor_id"):
                     before = (line["vendor_id"], line["unit_price"],
                               line.get("chosen_by"))
                     line = vendor_override.render(
@@ -181,8 +192,24 @@ def _render_review(db, draft):
         st.caption(f"✍️ {overridden} line(s) overridden by you — stored "
                    "as your call, savings computed against your pick.")
 
+    from core.quotes import eligible_quotes
+
+    expired = []
+    for line in lines:
+        if line["quantity"] <= 0:
+            continue
+        _, rejected = eligible_quotes(
+            [{"vendor": line["vendor"], "price": line["unit_price"],
+              "unit": line.get("unit"), "date_recorded": line.get("quote_date")}],
+            line.get("unit"), get_setting("MAX_QUOTE_AGE_DAYS", db=db))
+        expired.extend(f"{line['name']}: {note}" for note in rejected)
+    for note in expired:
+        st.warning(note + ". Discard this plan and review updated quotes.")
     if st.button("✅ Confirm — build the order (nothing is sent)",
-                 type="primary", use_container_width=True):
+                 type="primary", use_container_width=True,
+                 disabled=bool(expired) or not omissions_ok
+                 or not any(line["quantity"] > 0 for line in lines)):
+
         order_lines = [{
             "item_id": line["item_id"], "vendor_id": line["vendor_id"],
             "quantity": line["quantity"], "unit": line.get("unit"),
@@ -190,12 +217,15 @@ def _render_review(db, draft):
             "alt_vendor_id": line.get("alt_vendor_id"),
             "alt_price": line.get("alt_price"),
             "chosen_by": line.get("chosen_by", "engine"),
-        } for line in lines]
+        } for line in lines if line["quantity"] > 0]
         result = db.create_order(order_lines, status="completed",
                                  notes="Ordering round "
                                        f"(plan built {payload.get('built_at', '')})")
         stored = db.get_order(result["order_id"])
         db.confirm_draft(draft["id"])
+        for key in list(st.session_state):
+            if key.startswith(("rq_", "rv_qty_", "ovr_")) or key == "ack_missing_items":
+                del st.session_state[key]
         st.session_state["round_confirm_flash"] = {
             "order_id": result["order_id"],
             "lines": len(stored["items"]),
@@ -207,7 +237,9 @@ def _render_review(db, draft):
                "anything — place each order yourself (phone a rep, "
                "email, whatever works).")
     if st.button("↩️ Discard this plan, back to the sheet"):
-        import json as _json  # noqa: F401
+        for key in list(st.session_state):
+            if key.startswith(("rq_", "rv_qty_", "ovr_")) or key == "ack_missing_items":
+                del st.session_state[key]
 
         db.save_draft({"quantities": payload.get("quantities", {})},
                       status="entering")
@@ -217,6 +249,8 @@ def _render_review(db, draft):
 gate_or_stop()
 
 db = get_database()
+if "reset_quantity_key" in st.session_state:
+    st.session_state.pop(st.session_state.pop("reset_quantity_key"), None)
 
 # Outcome flash from a completed import (post-rerun so it actually
 # renders — a success banner set right before st.rerun() never shows).
@@ -288,8 +322,7 @@ else:
     elif stage == "plan_ready":
         _render_review(db, draft)
     st.divider()
-st.caption("The kitchen's standing list, prefilled from par. Phase C "
-           "brings quantity entry and the ordering round.")
+st.caption("Your standing list and par quantities.")
 
 if not sheet:
     if is_admin:
@@ -364,6 +397,36 @@ with tab_edit:
                     for item_id, par in parsed_values.items():
                         db.update_sheet_par(item_id, par)
                     st.success("Par levels saved.")
+                    st.rerun()
+
+        st.divider()
+        st.markdown("**Ordering units and packs**")
+        unit_item = st.selectbox("Item to correct", options=sheet,
+                                 format_func=lambda e: e["name"], key="unit_item")
+        active_draft = db.get_open_draft()
+        reviewing = active_draft and active_draft["status"] == "plan_ready"
+        if reviewing:
+            st.info("Finish or discard the reviewed plan before changing ordering units.")
+        with st.form("edit_ordering_unit"):
+            corrected_unit = st.text_input(
+                "Ordering unit / pack", value=unit_item["default_unit"] or "",
+                key=f"unit_edit_{unit_item['item_id']}",
+                help="Examples: Lb, Each, Case (6 x 1 lb). Include pack contents "
+                     "when vendors sell different packs.")
+            st.caption("Changing the unit resets this item's unsent quantity to 0; "
+                       "check its par level too. Correct vendor quote units in Settings → Add Items.")
+            if st.form_submit_button("Save ordering unit", disabled=bool(reviewing)):
+                if not corrected_unit.strip():
+                    st.error("Enter an ordering unit.")
+                elif corrected_unit.strip() != unit_item["default_unit"]:
+                    db.update_item_unit(unit_item["item_id"], corrected_unit.strip())
+                    quantities = dict((active_draft or {}).get("payload", {}).get("quantities", {}))
+                    quantities[unit_item["name"]] = 0.0
+                    db.save_entry_quantities(quantities)
+                    # This widget was already rendered earlier in this run;
+                    # let the next run clear it before creating widgets again.
+                    st.session_state["reset_quantity_key"] = f"rq_{unit_item['item_id']}"
+                    st.cache_data.clear()
                     st.rerun()
 
         st.divider()

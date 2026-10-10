@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import streamlit as st
 
 from core import auth
+from core.settings import get_setting
 from app.components.resources import get_database
 from app.components.auth_gate import is_authenticated, render_login
 from app.components.ui_helpers import collapse_sidebar_on_mobile
@@ -83,26 +84,23 @@ def home_dashboard():
 
     st.markdown("### 🚀 Quick Actions")
     col1, col2, col3 = st.columns(3)
+    order_page = ("views/1_📋_Order_Guide.py"
+                  if get_setting("ORDER_MODE", db=db) == "plan_during"
+                  else "views/5_📝_Order_Sheet.py")
     cards = [
-        (col1, "/Order_Guide", "📋", "Start Order",
-         "View recommendations & create orders"),
-        (col2, "/Settings", "📸", "Scan Invoice",
+        (col1, order_page, "📋", "Start Order",
+         "Enter quantities and review your order"),
+        (col2, "views/3_⚙️_Settings.py", "📸", "Scan Invoice",
          "Upload photos to add new items"),
-        (col3, "/Trends", "📈", "Analyze Trends",
+        (col3, "views/2_📈_Trends.py", "📈", "Analyze Trends",
          "Check price history & reports"),
     ]
-    for col, href, icon, title, desc in cards:
-        with col:
-            st.markdown(
-                f'''
-                <a href="{href}" target="_self" class="action-card">
-                    <div class="action-icon">{icon}</div>
-                    <div class="action-title">{title}</div>
-                    <div class="action-desc">{desc}</div>
-                </a>
-                ''',
-                unsafe_allow_html=True
-            )
+    for col, page, icon, title, desc in cards:
+        with col, st.container(border=True):
+            # Native navigation retains the signed-in websocket session.
+            # HTML anchors reload the app and send the user back to login.
+            st.page_link(page, label=title, icon=icon, use_container_width=True)
+            st.caption(desc)
 
     st.divider()
     st.subheader("📊 Quick Stats")

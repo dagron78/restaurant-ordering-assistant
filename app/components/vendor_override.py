@@ -22,7 +22,7 @@ import streamlit as st
 
 def item_options(db, item_name: str, chosen_vendor: str) -> list:
     """[{vendor, vendor_id, price}] for the item, chosen vendor first."""
-    prices = db.get_latest_prices(item_name) or []
+    prices, _ = db.get_orderable_quotes(item_name)
     options = [{"vendor": p["vendor"], "vendor_id": p["vendor_id"],
                 "price": float(p["price"])} for p in prices]
     options.sort(key=lambda o: (o["vendor"] != chosen_vendor,
@@ -35,11 +35,16 @@ def render(db, line: Dict, key: str) -> Dict:
 
     line needs: name, vendor, vendor_id, unit_price. After a change the
     line carries vendor_id/vendor/unit_price/chosen_by ('manager') and
-    the recomputed alt fields stay as they are — create_order stores
-    what it is given, and the review screen recomputes the displayed
-    net from the stored snapshot.
+    the alt fields track the cheapest other eligible snapshot quote.
+    create_order stores that baseline without consulting live prices.
     """
-    options = item_options(db, line["name"], line["vendor"])
+    # New plans retain every eligible quote, so a background refresh cannot
+    # change the price displayed by an override or the confirmed baseline.
+    options = line.get("quotes")
+    if options is None:
+        options = item_options(db, line["name"], line["vendor"])
+    options = sorted(options, key=lambda o: (o["vendor"] != line["vendor"],
+                                            o["price"]))
     if len(options) < 2:
         if options:
             st.caption(f"🏭 {line['vendor']} — only quote for "
@@ -65,21 +70,23 @@ def render(db, line: Dict, key: str) -> Dict:
 
     chosen = next(o for o in options if label(o) == chosen_label)
     if chosen["vendor_id"] != line["vendor_id"]:
-        # The road not taken becomes the baseline: the vendor being
-        # abandoned IS the honest alternative now. Keeping the old alt
-        # here would record a zero saving (alt == chosen) and hide the
-        # cost of a deliberate dearer pick.
-        abandoned = {"vendor_id": line["vendor_id"],
-                     "vendor": line["vendor"],
-                     "price": line["unit_price"]}
-        line["alt_vendor_id"] = abandoned["vendor_id"]
-        line["alt_vendor"] = abandoned["vendor"]
-        line["alt_price"] = abandoned["price"]
         line["vendor"] = chosen["vendor"]
         line["vendor_id"] = chosen["vendor_id"]
         line["unit_price"] = chosen["price"]
+        line["quote_date"] = chosen.get("date_recorded", line.get("quote_date"))
+        # Compare against the cheapest remaining eligible quote, including
+        # when more than two vendors quote or the manager overrides twice.
+        from core.database import pick_cheapest_alternative
+
+        alt = pick_cheapest_alternative(options, chosen["vendor"])
+        if alt:
+            line["alt_vendor_id"] = alt["vendor_id"]
+            line["alt_vendor"] = alt["vendor"]
+            line["alt_price"] = alt["price"]
+        if "qty" in line:
+            line["total"] = line["qty"] * line["unit_price"]
         line["chosen_by"] = "manager"
         st.caption("✍️ Your pick — recorded as an override, savings "
-                   "computed against the vendor you turned down.")
+                   "computed against the cheapest other eligible quote.")
     return line
 

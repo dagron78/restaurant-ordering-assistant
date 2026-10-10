@@ -137,7 +137,7 @@ if ORDER_MODE == "plan_during":
 if ORDER_MODE == "plan_after":
     st.info(
         "This kitchen orders **plan-after**: say what you need on the "
-        "Order Sheet, hit Send, and the suggested plan comes back for "
+        "Order Sheet, select Review suggested order, and the plan opens for "
         "review — request first, then how to buy it.",
         icon="🧭")
     try:
@@ -245,10 +245,12 @@ if ORDER_MODE == "plan_during":
                             'unit_price': item['price'] or 0,
                             'avg_price': item.get('avg_price') or item['price'] or 0,
                             'max_price': item.get('max_price') or item['price'] or 0,
-                            'total': qty * (item['price'] or 0)
+                            'total': qty * (item['price'] or 0),
+                            'quotes': item.get('all_prices', [])
                         })
                         _alt = pick_cheapest_alternative(
                             item.get('all_prices') or [], item['recommended_vendor'])
+                        order_items[-1]['alt_vendor_id'] = _alt['vendor_id'] if _alt else None
                         order_items[-1]['alt_price'] = _alt['price'] if _alt else None
                         order_items[-1]['alt_vendor'] = _alt['vendor'] if _alt else None
                         # Vendor override (Phase C): the manager can
@@ -314,10 +316,12 @@ if ORDER_MODE == "plan_during":
                                 'unit_price': item['price'] or 0,
                                 'avg_price': item.get('avg_price') or item['price'] or 0,
                                 'max_price': item.get('max_price') or item['price'] or 0,
-                                'total': qty * (item['price'] or 0)
+                                'total': qty * (item['price'] or 0),
+                                'quotes': item.get('all_prices', [])
                             })
                             _alt_c = pick_cheapest_alternative(
                                 item.get('all_prices') or [], item['recommended_vendor'])
+                            order_items[-1]['alt_vendor_id'] = _alt_c['vendor_id'] if _alt_c else None
                             order_items[-1]['alt_price'] = _alt_c['price'] if _alt_c else None
                             order_items[-1]['alt_vendor'] = _alt_c['vendor'] if _alt_c else None
                             order_items[-1] = vendor_override.render(
@@ -458,6 +462,8 @@ if ORDER_MODE == "plan_during":
                             'avg_price': item.get('avg_price'),
                             'max_price': item.get('max_price'),
                             'chosen_by': item.get('chosen_by', 'engine'),
+                            'alt_vendor_id': item.get('alt_vendor_id'),
+                            'alt_price': item.get('alt_price'),
                         })
             
                 if db_order_items:

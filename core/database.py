@@ -101,6 +101,9 @@ class Database:
         """
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
+        from .quotes import normalized_price
+
+        conn.create_function("normalized_price", 3, normalized_price, deterministic=True)
         # Enforce declared foreign keys (off by default in SQLite),
         # tolerate concurrent access from workers, and allow writers to wait.
         conn.execute("PRAGMA foreign_keys = ON")
@@ -407,6 +410,21 @@ class Database:
                 "INSERT INTO plan_drafts (status, payload) VALUES (?, ?)",
                 (status, json.dumps(payload)))
             return cursor.lastrowid
+
+    def save_entry_quantities(self, quantities: Dict) -> bool:
+        """Save committed widget edits without overwriting a plan in review."""
+        with self.get_connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT status FROM plan_drafts WHERE status != 'confirmed'"
+            ).fetchone()
+            if row and row["status"] != "entering":
+                return False
+            conn.execute("DELETE FROM plan_drafts WHERE status = 'entering'")
+            conn.execute(
+                "INSERT INTO plan_drafts (status, payload) VALUES ('entering', ?)",
+                (json.dumps({"quantities": quantities}),))
+        return True
 
     def confirm_draft(self, draft_id: int) -> None:
         """Mark a draft confirmed — terminal. It is kept for the record
@@ -715,6 +733,16 @@ class Database:
             
             return [dict(row) for row in cursor.fetchall()]
     
+    def get_orderable_quotes(self, item_name: str, unit=None):
+        from .quotes import eligible_quotes
+        from .settings import get_setting
+
+        item = self.get_item(name=item_name) or {}
+        return eligible_quotes(
+            self.get_latest_prices(item_name),
+            unit or item.get("default_unit"),
+            get_setting("MAX_QUOTE_AGE_DAYS", db=self))
+
     def get_item_market_average(self, item_name: str, days: int = None) -> Optional[float]:
         """
         Cross-vendor average for an item over the trailing window, including
@@ -743,11 +771,12 @@ class Database:
         cutoff_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
         
         query = """
-            SELECT AVG(ph.price) as avg_price
+            SELECT AVG(normalized_price(ph.price, ph.unit, i.default_unit)) as avg_price
             FROM price_history ph
             JOIN items i ON ph.item_id = i.id
             WHERE i.name = ?
             AND ph.date_recorded >= ?
+            AND ph.date_recorded <= date('now', 'localtime')
         """
         params: List = [item_name, cutoff_date]
         
@@ -780,12 +809,17 @@ class Database:
         
         with self.get_connection() as conn:
             cursor = conn.execute("""
-                SELECT v.name as vendor, ph.price, ph.date_recorded, ph.source
+                SELECT v.name as vendor,
+                       normalized_price(ph.price, ph.unit, i.default_unit) AS price,
+                       i.default_unit AS unit, ph.unit AS source_unit,
+                       ph.price AS source_price, ph.date_recorded, ph.source
                 FROM price_history ph
                 JOIN items i ON ph.item_id = i.id
                 JOIN vendors v ON ph.vendor_id = v.id
                 WHERE i.name = ?
                 AND ph.date_recorded >= ?
+                AND ph.date_recorded <= date('now', 'localtime')
+                AND normalized_price(ph.price, ph.unit, i.default_unit) IS NOT NULL
                 ORDER BY ph.date_recorded
             """, (item_name, cutoff_date))
             
@@ -816,13 +850,15 @@ class Database:
                     FROM price_history ph
                 ),
                 avgs AS (
-                    SELECT item_id, AVG(price) as avg_price
-                    FROM price_history
-                    WHERE date_recorded >= ?
-                    GROUP BY item_id
+                    SELECT ph.item_id,
+                           AVG(normalized_price(ph.price, ph.unit, i.default_unit)) as avg_price
+                    FROM price_history ph JOIN items i ON i.id = ph.item_id
+                    WHERE ph.date_recorded >= ?
+                      AND ph.date_recorded <= date('now', 'localtime')
+                    GROUP BY ph.item_id
                 )
                 SELECT i.id, i.name, i.category, i.default_unit,
-                       v.name as vendor, r.price, r.unit,
+                       v.name as vendor, v.id as vendor_id, r.price, r.unit,
                        r.date_recorded, r.source, a.avg_price
                 FROM items i
                 LEFT JOIN latest r ON r.item_id = i.id AND r.rn = 1
@@ -847,6 +883,7 @@ class Database:
             if row['vendor'] is not None:
                 item['prices'].append({
                     'vendor': row['vendor'],
+                    'vendor_id': row['vendor_id'],
                     'price': row['price'],
                     'unit': row['unit'],
                     'date_recorded': row['date_recorded'],
@@ -1021,28 +1058,31 @@ class Database:
         lowest vendor_id (mirrors pick_cheapest_alternative exactly).
         Returns None when no other vendor quotes the item.
         """
-        cursor = conn.execute(f"""
-            SELECT v.id AS vendor_id, v.name AS vendor, ranked.price AS price
+        from .quotes import eligible_quotes
+        from .settings import get_setting
+
+        item = conn.execute("SELECT default_unit FROM items WHERE id = ?",
+                            (item_id,)).fetchone()
+        if not item:
+            return None
+        rows = conn.execute(f"""
+            SELECT v.id AS vendor_id, v.name AS vendor, ranked.price,
+                   ranked.unit, ranked.date_recorded
             FROM (
-                SELECT ph.vendor_id, ph.price,
+                SELECT ph.vendor_id, ph.price, ph.unit, ph.date_recorded,
                        ROW_NUMBER() OVER (
                            PARTITION BY ph.vendor_id
                            ORDER BY {LATEST_PRICE_RANK_ORDER}
                        ) as rn
-                FROM price_history ph
-                WHERE ph.item_id = ?
+                FROM price_history ph WHERE ph.item_id = ?
             ) ranked
             JOIN vendors v ON v.id = ranked.vendor_id
             WHERE ranked.rn = 1 AND ranked.vendor_id != ?
-            ORDER BY ranked.price ASC, v.id ASC
-            LIMIT 1
-        """, (item_id, exclude_vendor_id))
-        row = cursor.fetchone()
-        if row is None:
-            return None
-        return {"vendor_id": row["vendor_id"],
-                "vendor": row["vendor"],
-                "price": float(row["price"])}
+        """, (item_id, exclude_vendor_id)).fetchall()
+        prices, _ = eligible_quotes(
+            [dict(row) for row in rows], item["default_unit"],
+            get_setting("MAX_QUOTE_AGE_DAYS", db=self))
+        return pick_cheapest_alternative(prices, "")
 
     def get_cheapest_alternative(self, item_name: str,
                                  exclude_vendor) -> Optional[Dict]:
@@ -1123,7 +1163,7 @@ class Database:
                 # market the manager never saw.
                 alt_vendor_id = item.get('alt_vendor_id')
                 alt_price = item.get('alt_price')
-                if alt_vendor_id is None or alt_price is None:
+                if 'alt_vendor_id' not in item and 'alt_price' not in item:
                     alt = None
                     if item.get('item_id') and item.get('vendor_id'):
                         alt = self._get_cheapest_alternative(
@@ -1140,6 +1180,12 @@ class Database:
                         sv_alt += line_vs_alt
                         alt_vendor_id = alt['vendor_id']
                         alt_price = alt['price']
+                elif alt_vendor_id is None or alt_price is None:
+                    excluded += 1
+                    line_basis = 'no_alternative'
+                    line_vs_alt = 0
+                    alt_vendor_id = None
+                    alt_price = None
                 else:
                     line_basis = 'vs_alt'
                     line_vs_alt = qty * (alt_price - unit_price)

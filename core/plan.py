@@ -67,8 +67,11 @@ def build_plan(db, quantities: Dict[str, float],
 
     lines: List[Dict] = []
     unpriced: List[str] = []
+    warnings: List[str] = []
     for name, qty in wanted.items():
         rec = by_name.get(name)
+        if rec:
+            warnings.extend(f"{name}: {note}" for note in rec.get("quote_warnings", []))
         if not rec or not rec.get("vendor_id") or rec.get("price") is None:
             unpriced.append(name)
             continue
@@ -88,10 +91,12 @@ def build_plan(db, quantities: Dict[str, float],
             "alt_price": (alt or {}).get("price"),
             "reasons": list(rec.get("reasons") or []),
             "chosen_by": "engine",
+            "quotes": enriched,
+            "quote_date": rec.get("quote_date"),
         })
 
     lines.sort(key=lambda line: line["name"].casefold())
-    return {"lines": lines, "unpriced": unpriced,
+    return {"lines": lines, "unpriced": unpriced, "warnings": warnings,
             "built_at": datetime.now().isoformat(timespec="seconds")}
 
 

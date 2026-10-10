@@ -88,19 +88,48 @@ The `.env` file is bootstrap only: `DATABASE_PATH` and the one-time
 
 ## The Ordering Round
 
-**Order Sheet → Send → suggested plan → override → Confirm** — request
+**Order Sheet → Review suggested order → suggested plan → override → Confirm** — request
 first, then how to buy it. The sheet opens prefilled from par; set what
-you need (0 for anything you don't), hit Send, and the plan comes back:
+you need (0 for anything you don't), select Review suggested order, and see:
 per line, the vendor, the price, the alternative it beat and why (rule
 names included). Every line is overridable — vendor or quantity — and a
 deliberately dearer pick is recorded as *your call* with an honest
 negative saving. Confirm **builds and stores the order; it does not
 send anything** — place each order yourself.
 
-The draft lives on the server: a phone screen lock loses nothing, and
-you can start on the phone and finish on the restaurant computer.
-Prices are snapshotted at Send, so what you confirm is exactly what is
-recorded, even if a vendor changes prices meanwhile.
+Quantity edits save to the server when you press Enter, leave the field,
+or use its +/− buttons. A new session restores those committed edits; text
+still being typed has not been saved. You can start on the phone and finish
+on the restaurant computer.
+All eligible vendor quotes are snapshotted when you open the suggested plan,
+including override choices. Confirmation stores those prices even if a
+vendor updates a quote meanwhile. Plans whose selected quotes have aged
+past the freshness limit must be rebuilt.
+
+### Comparable, current prices
+
+Settings → Configuration → Ordering round includes **Maximum quote age
+(days)**, default **14**. Older, future-dated, or undated quotes are excluded
+from purchasing recommendations, overrides, and new savings baselines.
+Rejected quotes are explained on the Order Sheet; raw price history is retained.
+Items without an eligible quote remain visible and require acknowledgment
+before confirming a partial order.
+
+Prices are normalized to the item's ordering unit. Supported weight and
+metric-volume units convert explicitly (for example ounces to pounds).
+Case-to-pound conversions are never guessed. Explicit packs such as
+`Case (6 x 1 lb)` and `6 x 16 oz` match; different counts or container sizes
+are excluded rather than silently changing the requested quantity.
+**Bare `Case` labels assume matching packs.** If vendors sell different
+packs, record the contents in the item's unit and each vendor quote's unit;
+the app cannot infer contents missing from your source data. Admins can
+correct ordering units under Order Sheet → Edit sheet → Ordering units and
+packs, and enter corrected vendor quotes through Settings → Add Items.
+Changing an ordering unit resets that item’s unsent quantity to zero. Ambiguous
+volume units are only compared to the exact same label.
+
+“Start Order” opens the Order Sheet by default and the Order Guide when
+plan-during mode is selected.
 
 Kitchens that prefer **plan-during** — prices inline while entering —
 can switch modes in Settings → Configuration; plan-after is the
