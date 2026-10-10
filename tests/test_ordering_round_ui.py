@@ -92,7 +92,7 @@ def test_plan_after_end_to_end_with_override(round_db):
     # Manager needs Cream and Foil, none of Roma this week.
     _quantities(at, **{"Heavy Cream": 2, "Heavy Duty Foil Wrap": 5,
                        "Roma Tomatoes": 0})
-    _btn(at, "Send — build the plan").click()
+    _btn(at, "Review suggested order").click()
     at.run(timeout=30)
 
     # Plan stage: two lines (Roma excluded — zero quantity), reasons and
@@ -157,7 +157,7 @@ def test_zero_quantity_lines_excluded_from_plan(round_db):
     at = _open(round_db)
     _quantities(at, **{"Heavy Cream": 2, "Heavy Duty Foil Wrap": 0,
                        "Roma Tomatoes": 0})
-    _btn(at, "Send — build the plan").click()
+    _btn(at, "Review suggested order").click()
     at.run(timeout=30)
 
     markdowns = " | ".join(m.value for m in at.markdown)
@@ -176,7 +176,7 @@ def test_confirm_stores_snapshot_not_live_prices(round_db):
     at = _open(round_db)
     _quantities(at, **{"Heavy Cream": 2, "Heavy Duty Foil Wrap": 0,
                        "Roma Tomatoes": 0})
-    _btn(at, "Send — build the plan").click()
+    _btn(at, "Review suggested order").click()
     at.run(timeout=30)
 
     # The market moves after Send, before Confirm:
@@ -206,7 +206,7 @@ def test_draft_rehydrates_after_session_loss(round_db):
     at1 = _open(round_db)
     _quantities(at1, **{"Heavy Cream": 4, "Heavy Duty Foil Wrap": 0,
                         "Roma Tomatoes": 0})
-    _btn(at1, "Send — build the plan").click()
+    _btn(at1, "Review suggested order").click()
     at1.run(timeout=30)
 
     # Brand-new AppTest = brand-new session: it resumes at the review
@@ -249,3 +249,79 @@ def test_mode_toggle_switches_the_flow(round_db):
     at2 = _open(round_db, page=str(APP / "views" / "1_📋_Order_Guide.py"))
     infos2 = " | ".join(i.value for i in at2.info)
     assert "plan-after" not in infos2
+
+
+def test_unsent_quantities_and_live_total_survive_session_loss(round_db):
+    at = _open(round_db)
+    _quantities(at, **{"Heavy Cream": 3, "Heavy Duty Foil Wrap": 0, "Roma Tomatoes": 0})
+    at.run(timeout=30)
+    assert not at.exception
+    draft = round_db.get_open_draft()
+    assert draft["status"] == "entering"
+    assert draft["payload"]["quantities"]["Heavy Cream"] == 3
+    assert next(m.value for m in at.metric if m.label == "Order total") == "$73.50"
+    fresh = _open(round_db)
+    assert next(n.value for n in fresh.number_input if n.label.startswith("Heavy Cream")) == 3
+
+
+def test_override_displays_and_stores_frozen_quote(round_db):
+    at = _open(round_db)
+    _quantities(at, **{"Heavy Cream": 2, "Heavy Duty Foil Wrap": 0, "Roma Tomatoes": 0})
+    _btn(at, "Review suggested order").click().run(timeout=30)
+    round_db.add_price("Heavy Cream", "US Foods", 99, "Case")
+    at.run(timeout=30)
+    box = next(s for s in at.selectbox if "Heavy Cream" in s.label)
+    option = next(o for o in box.options if o.startswith("US Foods"))
+    assert "$28.00" in option
+    box.set_value(option).run(timeout=30)
+    _btn(at, "Confirm").click().run(timeout=30)
+    assert not at.exception
+    order = round_db.get_order(round_db.list_orders()[0]["id"])
+    assert order["items"][0]["unit_price"] == 28
+    assert order["savings_vs_alt"] == -7
+
+
+def test_unpriced_items_remain_visible_and_require_acknowledgment(round_db):
+    item = round_db.add_item("Missing Quote", "Produce", "Case")
+    round_db.upsert_sheet_row(item, 2, 4)
+    at = _open(round_db)
+    _btn(at, "Review suggested order").click().run(timeout=30)
+    assert any("Missing Quote" in w.value for w in at.warning)
+    assert _btn(at, "Confirm").disabled
+    fresh = _open(round_db)
+    assert any("Missing Quote" in w.value for w in fresh.warning)
+    fresh.checkbox(key="ack_missing_items").check().run(timeout=30)
+    assert not _btn(fresh, "Confirm").disabled
+
+
+def test_expired_plan_cannot_be_confirmed(round_db):
+    at = _open(round_db)
+    _btn(at, "Review suggested order").click().run(timeout=30)
+    draft = round_db.get_open_draft()
+    draft["payload"]["lines"][0]["quote_date"] = "2020-01-01"
+    round_db.save_draft(draft["payload"], "plan_ready")
+    fresh = _open(round_db)
+    assert _btn(fresh, "Confirm").disabled
+    assert any("days old" in w.value for w in fresh.warning)
+
+
+def test_admin_can_correct_pack_unit_and_reset_unsent_quantity(round_db):
+    at = _open(round_db, role="admin")
+    item_id = round_db.get_item(name="Heavy Cream")["id"]
+    at.text_input(key=f"unit_edit_{item_id}").set_value("Case (6 x 1 lb)")
+    _btn(at, "Save ordering unit").click().run(timeout=30)
+    assert not at.exception
+    assert round_db.get_item(name="Heavy Cream")["default_unit"] == "Case (6 x 1 lb)"
+    assert next(n.value for n in at.number_input if n.label.startswith("Heavy Cream")) == 0
+
+
+def test_home_start_order_respects_ordering_mode(round_db):
+    from core.settings import set_settings
+
+    for mode, destination in [("plan_after", "/Order_Sheet"), ("plan_during", "/Order_Guide")]:
+        set_settings({"ORDER_MODE": mode}, db=round_db)
+        at = _open(round_db, page=str(APP / "Home.py"))
+        assert not at.exception
+        link = next(e.proto for e in at.get("page_link") if e.proto.label == "Start Order")
+        assert link.page == destination.lstrip("/"), link
+        assert not link.external

@@ -120,7 +120,7 @@ def main():
     logger.info("\n📋 Scheduled Jobs:")
     for job in scheduler.get_jobs():
         logger.info(f"   - {job.name}")
-        logger.info(f"     Next run: {job.next_run_time}")
+        logger.info("     Trigger: %s (next run calculated at startup)", job.trigger)
     
     logger.info(f"\n{'='*60}")
     logger.info("Scheduler running. Press Ctrl+C to stop.")

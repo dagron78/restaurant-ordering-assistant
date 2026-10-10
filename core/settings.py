@@ -48,6 +48,7 @@ SETTING_DEFS: Dict[str, tuple] = {
     "SCRAPE_DAY":        (0, int, False, "Scrape day (0=Mon .. 6=Sun)"),
     "SCRAPE_HOUR":       (4, int, False, "Scrape hour (0-23)"),
     "SCRAPE_DELAY_SECS": (2.0, float, False, "Pause between scrapes (secs)"),
+    "MAX_QUOTE_AGE_DAYS": (14, int, False, "Maximum quote age (days)"),
     # Trend analysis thresholds
     "TREND_DAYS":     (30, int, False, "Rolling average window (days)"),
     "SPIKE_THRESHOLD": (0.10, float, False, "Spike threshold (fraction)"),
@@ -149,6 +150,11 @@ def set_settings(updates: Dict[str, Any], db=None) -> None:
     unknown = [k for k in updates if k not in MANAGED_KEYS]
     if unknown:
         raise KeyError(f"Unknown settings: {unknown}")
+
+    if "MAX_QUOTE_AGE_DAYS" in updates:
+        age = updates["MAX_QUOTE_AGE_DAYS"]
+        if isinstance(age, bool) or int(age) != float(age) or not 1 <= int(age) <= 365:
+            raise ValueError("Maximum quote age must be an integer from 1 to 365 days")
 
     rows = [(k, str(v)) for k, v in updates.items()]
     conn = _open(db)

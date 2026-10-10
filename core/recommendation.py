@@ -265,9 +265,13 @@ class RecommendationEngine:
         """
         item_name = item.get('name', 'Unknown')
         category = item.get('category')
-        prices = item.get('prices', [])
+        from .quotes import eligible_quotes
+        from .settings import get_setting
+
+        prices, rejected = eligible_quotes(
+            item.get('prices', []), item.get('default_unit'),
+            get_setting("MAX_QUOTE_AGE_DAYS", db=self.db))
         avg_price = item.get('avg_price')
-        
         # No prices available
         if not prices:
             return {
@@ -278,10 +282,11 @@ class RecommendationEngine:
                 'vendor_id': None,
                 'price': None,
                 'unit': None,
-                'reason': 'No price data available',
+                'reason': '; '.join(rejected) or 'No price data available',
+                'quote_warnings': rejected,
                 'trend_icon': '⚫',
                 'trend': 'no_data',
-                'alert': 'No recent prices - consider updating',
+                'alert': '; '.join(rejected) or 'No recent prices - consider updating',
                 'all_prices': [],
                 'avg_price': None,
                 'max_price': None,
@@ -315,6 +320,7 @@ class RecommendationEngine:
                 'trend': 'excluded',
                 'alert': composition.get('offending_rule'),
                 'all_prices': prices,
+                'quote_warnings': rejected,
                 'avg_price': avg_price,
                 'max_price': None,
                 'savings_vs_avg': 0,
@@ -361,6 +367,7 @@ class RecommendationEngine:
             'recommended_vendor': best.get('vendor', 'Unknown'),
             'vendor_id': vendor_id,
             'price': best.get('price'),
+            'quote_date': best.get('date_recorded'),
             'unit': best.get('unit', 'Each'),
             'reason': best.get('reason', 'Lowest price'),
             'reasons': list(composition.get('reasons', [])),
@@ -369,6 +376,7 @@ class RecommendationEngine:
             'change_pct': trend_info.get('change_pct', 0),
             'alert': alert,
             'all_prices': prices,
+            'quote_warnings': rejected,
             'avg_price': avg_price,
             'max_price': max_price,
             'savings_vs_avg': savings_vs_avg,
@@ -544,7 +552,7 @@ class RecommendationEngine:
         Returns:
             Comparison dict with all vendor prices and analysis
         """
-        prices = self.db.get_latest_prices(item_name)
+        prices, rejected = self.db.get_orderable_quotes(item_name)
         avg_price = self.db.get_item_market_average(item_name)
         history = self.db.get_price_history(item_name)
         
@@ -554,7 +562,8 @@ class RecommendationEngine:
                 'prices': [],
                 'best_vendor': None,
                 'avg_price': None,
-                'history': []
+                'history': [],
+                'quote_warnings': rejected,
             }
         
         prefs = self.get_applicable_preferences(item_name)
@@ -576,5 +585,6 @@ class RecommendationEngine:
             'best_reason': best.get('reason'),
             'avg_price': avg_price,
             'applicable_preferences': prefs,
-            'history': history
+            'history': history,
+            'quote_warnings': rejected,
         }

@@ -4,6 +4,8 @@ RecommendationEngine takes an injected AI dependency; these tests use a
 stub so no Gemini key or network access is required.
 """
 
+from datetime import date
+
 import pytest
 
 from core.recommendation import RecommendationEngine
@@ -120,10 +122,11 @@ class TestGenerateRecommendation:
             'name': 'Heavy Cream',
             'id': 1,
             'category': 'Dairy',
+            'default_unit': 'Case',
             'avg_price': 26.00,
             'prices': [
-                {'vendor': 'Sysco', 'price': 22.00},
-                {'vendor': 'US Foods', 'price': 30.00},
+                {'vendor': 'Sysco', 'price': 22.00, 'unit': 'Case', 'date_recorded': date.today().isoformat()},
+                {'vendor': 'US Foods', 'price': 30.00, 'unit': 'Case', 'date_recorded': date.today().isoformat()},
             ],
         }
         rec = engine.generate_recommendation(item)
@@ -148,8 +151,9 @@ class TestGenerateRecommendation:
             'name': 'Avocados',
             'id': 2,
             'category': 'Produce',
+            'default_unit': 'Case',
             'avg_price': None,
-            'prices': [{'vendor': 'Sysco', 'price': 55.00}],
+            'prices': [{'vendor': 'Sysco', 'price': 55.00, 'unit': 'Case', 'date_recorded': date.today().isoformat()}],
         }
         rec = engine.generate_recommendation(item)
         assert rec['alert'] and 'threshold' in rec['alert']
